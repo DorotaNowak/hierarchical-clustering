@@ -1,0 +1,8 @@
+__pycache__/
+.idea
+
+results
+data
+
+slurm-train.sh
+slurm-cluster.sh
