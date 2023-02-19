@@ -83,7 +83,7 @@ if __name__ == '__main__':
     parser.add_argument('--k', default=200, type=int, help='Top k most similar images used to predict the label')
     parser.add_argument('--batch_size', default=128, type=int, help='Number of images in each mini-batch')
     parser.add_argument('--epochs', default=1000, type=int, help='Number of sweeps over the dataset to train')
-    parser.add_argument('--path', default='results', type=str, help='Path to save the model')
+    parser.add_argument('--path', default='results/exp-2/resnet', type=str, help='Path to save the model')
     parser.add_argument('--reload', default=False, type=bool, help='Reload the model')
     parser.add_argument('--saved_model_path', default=None, type=str, help='Path to the saved model')
 

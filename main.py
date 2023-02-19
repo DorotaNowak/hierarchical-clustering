@@ -13,27 +13,38 @@ from model import ResNet50, Model
 from loss import binary_loss, instance_loss
 
 
-def assign_clusters(model, loader, device):
+def get_leaf_to_delete(model, loader, device, iteration):
     model.eval()
-    clusters = []
+    clusters = np.zeros(16)
 
     for step, z in enumerate(loader):
         x = z[0]
         y = z[2]
         x = x.to(device)
         with torch.no_grad():
-            c = model.forward_cluster(x)
-        clusters.extend(c.cpu().detach().numpy())
+            c, probabilities = model.forward_cluster(x)
+            probabilities = torch.sum(probabilities, dim=0)
+            clusters += probabilities.cpu().detach().numpy()
         if step % 20 == 0:
             print(f"Step [{step}/{len(loader)}]\t Computing features...")
 
-    clusters = np.array(clusters)
+    print(np.argsort(clusters))
+    return np.argsort(clusters)[iteration] + 15
 
-    return clusters
+
+def update_mask(mask, leaf):
+    mask[leaf] = 0
+    parent = int((leaf - 1) / 2)
+    if mask[parent] == 1:
+        mask[parent] = -1
+    else:
+        update_mask(mask, parent)
+
+    return mask
 
 
 # Train for one epoch to learn unique features
-def train(net, data_loader, train_optimizer):
+def train(net, data_loader, train_optimizer, mask):
     net.train()
     total_loss, total_num, train_bar = 0.0, 0, tqdm(data_loader)
     for pos_1, pos_2, target in train_bar:
@@ -41,7 +52,7 @@ def train(net, data_loader, train_optimizer):
         feature_1, out_1, c_1 = net(pos_1)
         feature_2, out_2, c_2 = net(pos_2)
         feature_loss = instance_loss(out_1, out_2)
-        cluster_loss = binary_loss(c_1, c_2)
+        cluster_loss = binary_loss(c_1, c_2, mask)
         loss = feature_loss + cluster_loss
         train_optimizer.zero_grad()
         loss.backward()
@@ -99,6 +110,7 @@ def test(net, memory_data_loader, test_data_loader):
 
 
 if __name__ == '__main__':
+    torch.autograd.set_detect_anomaly(True)
     parser = argparse.ArgumentParser(description='Train SimCLR')
     parser.add_argument('--feature_dim', default=128, type=int, help='Feature dim for latent vector')
     parser.add_argument('--temperature', default=0.5, type=float, help='Temperature used in softmax')
@@ -155,21 +167,32 @@ if __name__ == '__main__':
     # Training loop
     results = {'train_loss': [], 'test_acc@1': [], 'test_acc@5': []}
     save_name_pre = f'{feature_dim}_{temperature}_{k}_{batch_size}_{epochs}'
+    mask = torch.ones(31).cuda()
 
     if not os.path.exists('results'):
         os.mkdir('results')
 
-    for epoch in range(start_epoch, epochs + 1):
-        train_loss = train(model, train_loader, optimizer)
+    for i in range(6):
+        print("Iteration: ", i)
+        for epoch in range(start_epoch, epochs + 1):
+            train_loss = train(model, train_loader, optimizer, mask)
+            results['train_loss'].append(train_loss)
+            test_acc_1, test_acc_5 = test(model, memory_loader, test_loader)
+            results['test_acc@1'].append(test_acc_1)
+            results['test_acc@5'].append(test_acc_5)
+            # Save statistics
+            # data_frame = pd.DataFrame(data=results, index=range(1, 2+i))
+            # data_frame.to_csv(f'{path}/{save_name_pre}_statistics.csv', index_label='epoch')
+
         # PRUNING
-        results['train_loss'].append(train_loss)
-        test_acc_1, test_acc_5 = test(model, memory_loader, test_loader)
-        results['test_acc@1'].append(test_acc_1)
-        results['test_acc@5'].append(test_acc_5)
-        # Save statistics
-        data_frame = pd.DataFrame(data=results, index=range(start_epoch, epoch + 1))
-        data_frame.to_csv(f'{path}/{save_name_pre}_statistics.csv', index_label='epoch')
-        if epoch % 2 == 0:
-            model_name = f'{feature_dim}_{temperature}_{k}_{batch_size}_{epochs}_{epoch}'
-            state = {'epoch': epoch, 'state_dict': model.state_dict(), 'optimizer': optimizer.state_dict()}
-            torch.save(state, f'{path}/{model_name}_model.pth')
+        leaf = get_leaf_to_delete(model, memory_loader, 'cuda', i)
+        print(leaf)
+        mask = update_mask(mask, leaf)
+        print(mask)
+
+        model_name = f'{feature_dim}_{temperature}_{k}_{batch_size}_{epochs}_{i}'
+        state = {'epoch': epoch,
+                 'state_dict': model.state_dict(),
+                 'optimizer': optimizer.state_dict(),
+                 'mask': mask}
+        torch.save(state, f'{path}/{model_name}_model.pth')

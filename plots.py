@@ -23,6 +23,7 @@ def plot_cluster(dataset, classes, idx, path):
     images = [dataset[i][0] for i in idxs]
     if len(images) > 0:
         imshow(torchvision.utils.make_grid(images))
+        plt.title(f"Cluster {idx}")
         plt.savefig(f"{path}/plots/images_{idx}.png")
 
 
@@ -50,7 +51,7 @@ def plot_hist(clusters, idx, classes, path):
 
 def plot_confusion_matrix(pred, true, path):
     plt.clf()
-    cm = confusion_matrix(pred, true)
+    cm = confusion_matrix(pred, true, labels=range(16))
 
     ax = sns.heatmap(cm, annot=True, fmt="d", cmap="Blues")
     b, t = plt.ylim()

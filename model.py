@@ -48,7 +48,7 @@ class Model(nn.Module):
         # Binary projection head
         self.cluster_projector = nn.Sequential(
             nn.Linear(2048, 512),
-            nn.ReLU(),
+            nn.ReLU(inplace=False),
             nn.Linear(512, self.cluster_num - 1),
             nn.Sigmoid()
         )
@@ -65,4 +65,4 @@ class Model(nn.Module):
 
         probability_vector = calculate_probability_level(c, self.levels)
         cluster_idx = torch.argmax(probability_vector, dim=1)
-        return cluster_idx
+        return cluster_idx, probability_vector

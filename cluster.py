@@ -28,7 +28,7 @@ def make_histogram(pred, true, classes, bins=16):
     return list_of_num
 
 
-def inference(loader, model, device):
+def inference(loader, model, device, mask):
     model.eval()
     feature_vector = []
     labels_vector = []
@@ -38,7 +38,10 @@ def inference(loader, model, device):
         y = z[2]
         x = x.to(device)
         with torch.no_grad():
-            c = model.forward_cluster(x)
+            c, probability_vector = model.forward_cluster(x)
+
+        probability_vector = probability_vector * torch.abs(mask)
+        c = torch.argmax(probability_vector, dim=1)
         feature_vector.extend(c.cpu().detach().numpy())
         labels_vector.extend(y.numpy())
         if step % 20 == 0:
@@ -83,12 +86,14 @@ if __name__ == "__main__":
     checkpoint = torch.load(path)
     model.load_state_dict(checkpoint['state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer'])
+    mask = checkpoint['mask'][15:31]
     print(model.eval())
+    print(mask)
 
     # Test the model
     classes = ['plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
 
-    pred, true = inference(test_loader, model, device)
+    pred, true = inference(test_loader, model, device, mask)
 
     nmi, ari, f = evaluate(true, pred)
     print('NMI = {:.4f} ARI = {:.4f} F = {:.4f}'.format(nmi, ari, f))

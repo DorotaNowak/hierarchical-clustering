@@ -34,7 +34,7 @@ def mask_correlated_samples(leaves):
     return mask
 
 
-def binary_loss(c_i, c_j, levels=5, temperature=1.0):
+def binary_loss(c_i, c_j, node_mask, levels=5, temperature=1.0):
     criterion = nn.CrossEntropyLoss(reduction="sum")
     total_loss = 0
 
@@ -44,21 +44,24 @@ def binary_loss(c_i, c_j, levels=5, temperature=1.0):
     total_loss -= 0.5 * ne_loss
 
     for level in range(2, levels + 1):
-        h_i = calculate_probability_level(c_i, level)  # 128x16
-        h_j = calculate_probability_level(c_j, level)  # 128x16
+        h_i = calculate_probability_level(c_i, level) * torch.abs(
+            node_mask[2 ** (level - 1) - 1: 2 ** level - 1])  # 128x16
+        h_j = calculate_probability_level(c_j, level) * torch.abs(
+            node_mask[2 ** (level - 1) - 1: 2 ** level - 1])  # 128x16
 
         # foreach node on level level
         weight = 2 ** - level
         if level < levels:
             for node in range(2 ** (level - 1)):
-                denominator_i = h_i[:, node].sum()
-                numerator_i = torch.sum(h_i[:, node] * c_i[:, 2 ** (level - 1) - 1 + node])
-                denominator_j = h_j[:, node].sum()
-                numerator_j = torch.sum(h_j[:, node] * c_j[:, 2 ** (level - 1) - 1 + node])
-                ne_i = node_entropy(numerator_i / denominator_i)
-                ne_j = node_entropy(numerator_j / denominator_j)
-                ne_loss = ne_i + ne_j
-                total_loss -= weight * ne_loss
+                if node_mask[2 ** (level - 1) - 1 + node] == 1:
+                    denominator_i = h_i[:, node].sum()
+                    numerator_i = torch.sum(h_i[:, node] * c_i[:, 2 ** (level - 1) - 1 + node])
+                    denominator_j = h_j[:, node].sum()
+                    numerator_j = torch.sum(h_j[:, node] * c_j[:, 2 ** (level - 1) - 1 + node])
+                    ne_i = node_entropy(numerator_i / denominator_i)
+                    ne_j = node_entropy(numerator_j / denominator_j)
+                    ne_loss = ne_i + ne_j
+                    total_loss -= weight * ne_loss
 
         h_i = h_i.T
         h_j = h_j.T
