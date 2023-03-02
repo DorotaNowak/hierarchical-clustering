@@ -9,6 +9,7 @@ import torch.optim as optim
 from thop import profile, clever_format
 from torch.utils.data import DataLoader
 
+from cluster import inference, evaluate
 from model import ResNet50, Model
 from loss import binary_loss, instance_loss
 
@@ -110,7 +111,10 @@ def test(net, memory_data_loader, test_data_loader):
 
 
 if __name__ == '__main__':
+
     torch.autograd.set_detect_anomaly(True)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     parser = argparse.ArgumentParser(description='Train SimCLR')
     parser.add_argument('--feature_dim', default=128, type=int, help='Feature dim for latent vector')
     parser.add_argument('--temperature', default=0.5, type=float, help='Temperature used in softmax')
@@ -118,15 +122,12 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default=128, type=int, help='Number of images in each mini-batch')
     parser.add_argument('--epochs', default=500, type=int, help='Number of sweeps over the dataset to train')
     parser.add_argument('--path', default='results', type=str, help='Path to save the model')
-    parser.add_argument('--reload', default=False, type=bool, help='Reload the model')
-    parser.add_argument('--saved_model_path', default=None, type=str, help='Path to the saved model')
 
     # Arg parse
     args = parser.parse_args()
     feature_dim, temperature, k = args.feature_dim, args.temperature, args.k
     batch_size, epochs = args.batch_size, args.epochs
     path = args.path
-    reload = args.reload
 
     # Prepare the data
     train_data = utils.CIFAR10Pair(root='data', train=True, transform=utils.train_transform, download=True)
@@ -142,7 +143,7 @@ if __name__ == '__main__':
     resnet_optimizer = optim.Adam(resnet.parameters(), lr=5e-4, weight_decay=1e-6)
     flops, params = profile(resnet, inputs=(torch.randn(1, 3, 32, 32).cuda(),))
     flops, params = clever_format([flops, params])
-    resnet_path = 'results/exp-1/resnet/128_0.5_200_128_500_500_model.pth'
+    resnet_path = 'results/exp-2/resnet/128_0.5_200_128_500_500_model.pth'
     checkpoint = torch.load(resnet_path)
     resnet.load_state_dict(checkpoint['state_dict'])
     resnet_optimizer.load_state_dict(checkpoint['optimizer'])
@@ -154,13 +155,6 @@ if __name__ == '__main__':
     print('# Model Params: {} FLOPs: {}'.format(params, flops))
     optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-6)
     start_epoch = 1
-
-    if reload:
-        saved_path = args.saved_model_path
-        checkpoint = torch.load(saved_path)
-        model.load_state_dict(checkpoint['state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        start_epoch = checkpoint['epoch'] + 1
 
     c = len(memory_data.classes)
 
@@ -176,6 +170,11 @@ if __name__ == '__main__':
         print("Iteration: ", i)
         for epoch in range(start_epoch, epochs + 1):
             train_loss = train(model, train_loader, optimizer, mask)
+
+            pred, true = inference(test_loader, model, device, mask[15:31])
+            nmi, ari, f = evaluate(true, pred)
+            print('NMI = {:.4f} ARI = {:.4f} F = {:.4f}'.format(nmi, ari, f))
+
             results['train_loss'].append(train_loss)
             test_acc_1, test_acc_5 = test(model, memory_loader, test_loader)
             results['test_acc@1'].append(test_acc_1)
@@ -191,8 +190,7 @@ if __name__ == '__main__':
         print(mask)
 
         model_name = f'{feature_dim}_{temperature}_{k}_{batch_size}_{epochs}_{i}'
-        state = {'epoch': epoch,
-                 'state_dict': model.state_dict(),
+        state = {'state_dict': model.state_dict(),
                  'optimizer': optimizer.state_dict(),
                  'mask': mask}
         torch.save(state, f'{path}/{model_name}_model.pth')
