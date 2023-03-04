@@ -54,9 +54,9 @@ def binary_loss(c_i, c_j, node_mask, levels=5, temperature=1.0):
         if level < levels:
             for node in range(2 ** (level - 1)):
                 if node_mask[2 ** (level - 1) - 1 + node] == 1:
-                    denominator_i = h_i[:, node].sum()
+                    denominator_i = h_i[:, node].sum() + 1e-8
                     numerator_i = torch.sum(h_i[:, node] * c_i[:, 2 ** (level - 1) - 1 + node])
-                    denominator_j = h_j[:, node].sum()
+                    denominator_j = h_j[:, node].sum() + 1e-8
                     numerator_j = torch.sum(h_j[:, node] * c_j[:, 2 ** (level - 1) - 1 + node])
                     ne_i = node_entropy(numerator_i / denominator_i)
                     ne_j = node_entropy(numerator_j / denominator_j)
