@@ -1,7 +1,7 @@
 import math
 import torch
 import torch.nn as nn
-
+import torch.nn.functional as F
 
 def calculate_probability_level(feature, level):
     leaves = 2 ** (level - 1)
@@ -63,25 +63,10 @@ def binary_loss(c_i, c_j, node_mask, levels=5, temperature=1.0):
                     ne_loss = ne_i + ne_j
                     total_loss -= weight * ne_loss
 
-        h_i = h_i.T
-        h_j = h_j.T
+        h_i = F.normalize(h_i.T, dim=1)
+        h_j = F.normalize(h_j.T, dim=1)
 
-        leaves = 2 ** (level - 1)
-        N = 2 * leaves
-        z = torch.cat((h_i, h_j), dim=0)
-
-        sim = torch.matmul(z, z.T) / temperature
-        sim_i_j = torch.diag(sim, leaves)
-        sim_j_i = torch.diag(sim, -leaves)
-
-        mask = mask_correlated_samples(2 ** (level - 1))
-        positive_samples = torch.cat((sim_i_j, sim_j_i), dim=0).reshape(N, 1)
-        negative_samples = sim[mask].reshape(N, -1)
-
-        labels = torch.zeros(N).to(positive_samples.device).long()
-        logits = torch.cat((positive_samples, negative_samples), dim=1)
-        loss = criterion(logits, labels)
-        loss /= N
+        loss = instance_loss(h_i, h_j, 1, 2 ** (level-1))
 
         total_loss += loss
 

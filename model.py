@@ -66,10 +66,10 @@ class Model(nn.Module):
         transformed = self.transformers(torch.cat((feature, node_encoded), 1))  # transformed.shape = [bs, 2048]
         pr = self.router(transformed)  # pr.shape = [bs, 2]
 
-        probabilities = torch.ones((batch_size, 15)).to('cuda')  # probabilities.shape = [bs, 16]
+        probabilities = torch.ones((batch_size, 15)).to('cuda')  # probabilities.shape = [bs, 15]
         probabilities[:, 0] = pr[:, 0]
 
-        representations = torch.ones((batch_size, 15, 2048)).to('cuda')  # representations.shape = [bs, 16, 2048]
+        representations = torch.ones((batch_size, 15, 2048)).to('cuda')  # representations.shape = [bs, 15, 2048]
         representations[:, 0, :] = transformed
 
         for node in range(1, 15):

@@ -20,7 +20,6 @@ def get_leaf_to_delete(model, loader, device, iteration):
 
     for step, z in enumerate(loader):
         x = z[0]
-        y = z[2]
         x = x.to(device)
         with torch.no_grad():
             c, probabilities = model.forward_cluster(x)
@@ -166,6 +165,7 @@ if __name__ == '__main__':
     if not os.path.exists('results'):
         os.mkdir('results')
 
+    epochs = 2
     for i in range(6):
         print("Iteration: ", i)
         for epoch in range(start_epoch, epochs + 1):
