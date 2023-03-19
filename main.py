@@ -10,7 +10,7 @@ from thop import profile, clever_format
 from torch.utils.data import DataLoader
 
 from cluster import inference, evaluate
-from model import ResNet50, Model
+from model import ResNet50, Model, BaseModel
 from loss import binary_loss, instance_loss
 
 
@@ -148,7 +148,7 @@ if __name__ == '__main__':
     resnet_optimizer.load_state_dict(checkpoint['optimizer'])
 
     # Main model
-    model = Model(resnet).cuda()
+    model = BaseModel(resnet).cuda()
     flops, params = profile(model, inputs=(torch.randn(1, 3, 32, 32).cuda(),))
     flops, params = clever_format([flops, params])
     print('# Model Params: {} FLOPs: {}'.format(params, flops))

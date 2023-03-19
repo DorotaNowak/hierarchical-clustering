@@ -38,6 +38,118 @@ class ResNet50(nn.Module):
         return F.normalize(feature, dim=-1), F.normalize(out, dim=-1)
 
 
+class BaseModel(nn.Module):
+    def __init__(self, resnet, levels=5):
+        super(BaseModel, self).__init__()
+        self.resnet = resnet
+        self.levels = levels
+        self.cluster_num = 2 ** (self.levels - 1)
+
+        # Binary projection head
+        self.cluster_projector = nn.Sequential(
+            nn.Linear(2048, 512),
+            nn.ReLU(inplace=False),
+            nn.Linear(512, self.cluster_num - 1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        feature = self.resnet.get_feature(x)
+        out = self.resnet.g(feature)
+        c = self.cluster_projector(feature)
+        return F.normalize(feature, dim=-1), F.normalize(out, dim=-1), c
+
+    def forward_cluster(self, x):
+        feature = self.resnet.get_feature(x)
+        c = self.cluster_projector(feature)
+
+        probability_vector = calculate_probability_level(c, self.levels)
+        cluster_idx = torch.argmax(probability_vector, dim=1)
+        return cluster_idx, probability_vector
+
+
+class Model(nn.Module):
+    def __init__(self, resnet, levels=5):
+        super(Model, self).__init__()
+        self.resnet = resnet
+        self.levels = levels
+        self.cluster_num = 2 ** (self.levels - 1)
+
+        self.transformers = nn.Sequential(
+            nn.Linear(2048 + self.cluster_num - 1, 2048),
+            nn.ReLU(inplace=True),
+            nn.Linear(2048, 2048),
+        )
+        self.router = nn.Sequential(
+            nn.Linear(2048, 2),
+            nn.Softmax(1)
+        )
+
+    def forward(self, x):
+        batch_size = x.shape[0]
+        feature = self.resnet.get_feature(x)
+        out = self.resnet.g(feature)
+
+        node_encoded = torch.zeros((batch_size, 15)).to('cuda')  # node_encoded.shape = [bs, 15]
+        node_encoded[:, 0] = 1.
+
+        transformed = self.transformers(torch.cat((feature, node_encoded), 1))  # transformed.shape = [bs, 2048]
+        pr = self.router(transformed)  # pr.shape = [bs, 2]
+
+        probabilities = torch.ones((batch_size, 15)).to('cuda')  # probabilities.shape = [bs, 15]
+        probabilities[:, 0] = pr[:, 0]
+
+        representations = torch.ones((batch_size, 15, 2048)).to('cuda')  # representations.shape = [bs, 15, 2048]
+        representations[:, 0, :] = transformed
+
+        for node in range(1, 15):
+            node_encoded[:, node - 1] = 0.
+            node_encoded[:, node] = 1.
+            parent = int((node - 1) / 2)
+
+            transformed = self.transformers(
+                torch.cat((representations[:, parent, :], node_encoded), 1))  # [batch_size, 2048]
+            pr = self.router(transformed)  # [bs, 2]
+
+            representations[:, node, :] = transformed
+            probabilities[:, node] = pr[:, 0]
+
+        return F.normalize(feature, dim=-1), F.normalize(out, dim=-1), probabilities
+
+
+    def forward_cluster(self, x):
+        batch_size = x.shape[0]
+        feature = self.resnet.get_feature(x)
+
+        node_encoded = torch.zeros((batch_size, 15)).to('cuda')  # node_encoded.shape = [bs, 15]
+        node_encoded[:, 0] = 1.
+
+        transformed = self.transformers(torch.cat((feature, node_encoded), 1))  # transformed.shape = [bs, 2048]
+        pr = self.router(transformed)  # pr.shape = [bs, 2]
+
+        probabilities = torch.ones((batch_size, 15)).to('cuda')  # probabilities.shape = [bs, 16]
+        probabilities[:, 0] = pr[:, 0]
+
+        representations = torch.ones((batch_size, 15, 2048)).to('cuda')  # representations.shape = [bs, 16, 2048]
+        representations[:, 0, :] = transformed
+
+        for node in range(1, 15):
+            node_encoded[:, node - 1] = 0.
+            node_encoded[:, node] = 1.
+            parent = int((node - 1) / 2)
+
+            transformed = self.transformers(
+                torch.cat((representations[:, parent, :], node_encoded), 1))  # [batch_size, 2048]
+            pr = self.router(transformed)  # [bs, 2]
+
+            representations[:, node, :] = transformed
+            probabilities[:, node] = pr[:, 0]
+
+        probability_vector = calculate_probability_level(probabilities, self.levels)
+        cluster_idx = torch.argmax(probability_vector, dim=1)
+        return cluster_idx, probability_vector
+
+
 class Model(nn.Module):
     def __init__(self, resnet, levels=5):
         super(Model, self).__init__()
