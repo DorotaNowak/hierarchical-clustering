@@ -7,7 +7,7 @@ from thop import profile
 from torch.utils.data import DataLoader, ConcatDataset
 
 from plots import plot_hist, plot_cluster, plot_confusion_matrix
-from model import ResNet50, Model
+from model import ResNet50, BaseModel, Model, Model2, Model3
 from evaluation import evaluate
 
 
@@ -64,6 +64,7 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', default=500, type=int, help='Number of sweeps over the dataset to train')
     parser.add_argument('--path', type=str, help='Path to the model')
     parser.add_argument('--results_path', type=str, help='Path to save the results')
+    parser.add_argument('--model', default='base', type=str, help='Model to use')
 
     # Parse args
     args = parser.parse_args()
@@ -71,6 +72,7 @@ if __name__ == "__main__":
     batch_size, epochs = args.batch_size, args.epochs
     path = args.path
     results_path = args.results_path
+    model_type = args.model
 
     # Prepare the data
     train_data = utils.CIFAR10Pair(root='data', train=True, transform=utils.test_transform, download=True)
@@ -80,7 +82,16 @@ if __name__ == "__main__":
 
     # Load the model
     resnet = ResNet50().cuda()
-    model = Model(resnet).cuda()
+
+    if model_type == 'base':
+        model = BaseModel(resnet).cuda()
+    elif model_type == 'first':
+        model = Model(resnet).cuda()
+    elif model_type == 'second':
+        model = Model2(resnet).cuda()
+    elif model_type == 'third':
+        model = Model3(resnet).cuda()
+
     flops, params = profile(model, inputs=(torch.randn(1, 3, 32, 32).cuda(),))
     optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-6)
     checkpoint = torch.load(path)

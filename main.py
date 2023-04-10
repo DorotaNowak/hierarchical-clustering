@@ -1,7 +1,6 @@
 import argparse
 import os
 import utils
-import pandas as pd
 import numpy as np
 from tqdm import tqdm
 import torch
@@ -9,8 +8,9 @@ import torch.optim as optim
 from thop import profile, clever_format
 from torch.utils.data import DataLoader
 
+from plots import plot_metric
 from cluster import inference, evaluate
-from model import ResNet50, Model, BaseModel
+from model import ResNet50, BaseModel, Model, Model2, Model3, Model4, Model5
 from loss import binary_loss, instance_loss
 
 
@@ -121,12 +121,14 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default=128, type=int, help='Number of images in each mini-batch')
     parser.add_argument('--epochs', default=500, type=int, help='Number of sweeps over the dataset to train')
     parser.add_argument('--path', default='results', type=str, help='Path to save the model')
+    parser.add_argument('--model', default='base', type=str, help='Model to use')
 
     # Arg parse
     args = parser.parse_args()
     feature_dim, temperature, k = args.feature_dim, args.temperature, args.k
     batch_size, epochs = args.batch_size, args.epochs
     path = args.path
+    model_type = args.model
 
     # Prepare the data
     train_data = utils.CIFAR10Pair(root='data', train=True, transform=utils.train_transform, download=True)
@@ -148,23 +150,50 @@ if __name__ == '__main__':
     resnet_optimizer.load_state_dict(checkpoint['optimizer'])
 
     # Main model
-    model = BaseModel(resnet).cuda()
+    if model_type == 'base':
+        model = BaseModel(resnet).cuda()
+    elif model_type == 'first':
+        model = Model(resnet).cuda()
+    elif model_type == 'second':
+        model = Model2(resnet).cuda()
+    elif model_type == 'third':
+        model = Model3(resnet).cuda()
+    elif model_type == 'fourth':
+        model = Model4(resnet).cuda()
+    elif model_type == 'fifth':
+        model = Model5(resnet).cuda()
+
+
     flops, params = profile(model, inputs=(torch.randn(1, 3, 32, 32).cuda(),))
     flops, params = clever_format([flops, params])
     print('# Model Params: {} FLOPs: {}'.format(params, flops))
     optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-6)
-    start_epoch = 1
 
     c = len(memory_data.classes)
 
     # Training loop
     results = {'train_loss': [], 'test_acc@1': [], 'test_acc@5': []}
     save_name_pre = f'{feature_dim}_{temperature}_{k}_{batch_size}_{epochs}'
+    clustering_results = {'nmi': [], 'ari': [], 'f': []}
     mask = torch.ones(31).cuda()
 
     if not os.path.exists('results'):
         os.mkdir('results')
 
+    start_epoch = 1
+    epochs = 10
+    for epoch in range(start_epoch, epochs + 1):
+        train_loss = train(model, train_loader, optimizer, mask)
+
+        pred, true = inference(test_loader, model, device, mask[15:31])
+        nmi, ari, f = evaluate(true, pred)
+        print('NMI = {:.4f} ARI = {:.4f} F = {:.4f}'.format(nmi, ari, f))
+        clustering_results['nmi'].append(nmi)
+        clustering_results['ari'].append(ari)
+        clustering_results['f'].append(f)
+        results['train_loss'].append(train_loss)
+
+    start_epoch = 1
     epochs = 2
     for i in range(6):
         print("Iteration: ", i)
@@ -174,6 +203,9 @@ if __name__ == '__main__':
             pred, true = inference(test_loader, model, device, mask[15:31])
             nmi, ari, f = evaluate(true, pred)
             print('NMI = {:.4f} ARI = {:.4f} F = {:.4f}'.format(nmi, ari, f))
+            clustering_results['nmi'].append(nmi)
+            clustering_results['ari'].append(ari)
+            clustering_results['f'].append(f)
 
             results['train_loss'].append(train_loss)
             test_acc_1, test_acc_5 = test(model, memory_loader, test_loader)
@@ -194,3 +226,27 @@ if __name__ == '__main__':
                  'optimizer': optimizer.state_dict(),
                  'mask': mask}
         torch.save(state, f'{path}/{model_name}_model.pth')
+
+    start_epoch = 1
+    epochs = 10
+    for epoch in range(start_epoch, epochs + 1):
+        train_loss = train(model, train_loader, optimizer, mask)
+
+        pred, true = inference(test_loader, model, device, mask[15:31])
+        nmi, ari, f = evaluate(true, pred)
+        print('NMI = {:.4f} ARI = {:.4f} F = {:.4f}'.format(nmi, ari, f))
+        clustering_results['nmi'].append(nmi)
+        clustering_results['ari'].append(ari)
+        clustering_results['f'].append(f)
+        results['train_loss'].append(train_loss)
+
+    model_name = f'{feature_dim}_{temperature}_{k}_{batch_size}_{epochs}_total'
+    state = {'state_dict': model.state_dict(),
+             'optimizer': optimizer.state_dict(),
+             'mask': mask}
+    torch.save(state, f'{path}/{model_name}_model.pth')
+
+    for key, values in clustering_results.items():
+        plot_metric(values, key, path)
+
+    plot_metric(results['train_loss'], 'loss', path)

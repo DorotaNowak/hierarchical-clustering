@@ -61,3 +61,12 @@ def plot_confusion_matrix(pred, true, path):
     plt.xlabel("True")
     plt.ylabel("Predicted")
     plt.savefig(f"{path}/plots/cm.png")
+
+
+def plot_metric(values, metric, path):
+    plt.clf()
+    epoch_count = range(1, len(values) + 1)
+    plt.plot(epoch_count, values)
+    plt.xticks(epoch_count)
+    plt.title(metric)
+    plt.savefig(f"{path}/plots/{metric}.png")
