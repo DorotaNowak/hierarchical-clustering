@@ -83,7 +83,7 @@ if __name__ == '__main__':
     parser.add_argument('--k', default=200, type=int, help='Top k most similar images used to predict the label')
     parser.add_argument('--batch_size', default=128, type=int, help='Number of images in each mini-batch')
     parser.add_argument('--epochs', default=1000, type=int, help='Number of sweeps over the dataset to train')
-    parser.add_argument('--path', default='results/exp-2/resnet', type=str, help='Path to save the model')
+    parser.add_argument('--path', default='results/resnet', type=str, help='Path to save the model')
     parser.add_argument('--reload', default=False, type=bool, help='Reload the model')
     parser.add_argument('--saved_model_path', default=None, type=str, help='Path to the saved model')
 
@@ -124,8 +124,8 @@ if __name__ == '__main__':
     results = {'train_loss': [], 'test_acc@1': [], 'test_acc@5': []}
     save_name_pre = f'{feature_dim}_{temperature}_{k}_{batch_size}_{epochs}'
 
-    if not os.path.exists('results'):
-        os.mkdir('results')
+    if not os.path.exists(path):
+        os.mkdir(path)
 
     for epoch in range(start_epoch, epochs + 1):
         train_loss = train(model, train_loader, optimizer)

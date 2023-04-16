@@ -7,10 +7,11 @@ import torch
 import torch.optim as optim
 from thop import profile, clever_format
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 
 from plots import plot_metric
 from cluster import inference, evaluate
-from model import ResNet50, BaseModel, Model, Model2, Model3, Model4, Model5
+from model import ResNet50, BaseModel, Model, Model2, Model3, Model4, Model5, Model6, Model7
 from loss import binary_loss, instance_loss
 
 
@@ -130,6 +131,9 @@ if __name__ == '__main__':
     path = args.path
     model_type = args.model
 
+    # Initialize summary writer
+    writer = SummaryWriter()
+
     # Prepare the data
     train_data = utils.CIFAR10Pair(root='data', train=True, transform=utils.train_transform, download=True)
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True,
@@ -162,6 +166,10 @@ if __name__ == '__main__':
         model = Model4(resnet).cuda()
     elif model_type == 'fifth':
         model = Model5(resnet).cuda()
+    elif model_type == 'sixth':
+        model = Model6(resnet).cuda()
+    elif model_type == 'seventh':
+        model = Model7(resnet).cuda()
 
 
     flops, params = profile(model, inputs=(torch.randn(1, 3, 32, 32).cuda(),))
@@ -184,7 +192,7 @@ if __name__ == '__main__':
     epochs = 10
     for epoch in range(start_epoch, epochs + 1):
         train_loss = train(model, train_loader, optimizer, mask)
-
+        writer.add_scalar("Loss/train", train_loss, epoch)
         pred, true = inference(test_loader, model, device, mask[15:31])
         nmi, ari, f = evaluate(true, pred)
         print('NMI = {:.4f} ARI = {:.4f} F = {:.4f}'.format(nmi, ari, f))
@@ -199,7 +207,7 @@ if __name__ == '__main__':
         print("Iteration: ", i)
         for epoch in range(start_epoch, epochs + 1):
             train_loss = train(model, train_loader, optimizer, mask)
-
+            writer.add_scalar("Loss/train", train_loss, 10 + 2*i + epoch)
             pred, true = inference(test_loader, model, device, mask[15:31])
             nmi, ari, f = evaluate(true, pred)
             print('NMI = {:.4f} ARI = {:.4f} F = {:.4f}'.format(nmi, ari, f))
@@ -231,7 +239,7 @@ if __name__ == '__main__':
     epochs = 10
     for epoch in range(start_epoch, epochs + 1):
         train_loss = train(model, train_loader, optimizer, mask)
-
+        writer.add_scalar("Loss/train", train_loss, 22 + epoch)
         pred, true = inference(test_loader, model, device, mask[15:31])
         nmi, ari, f = evaluate(true, pred)
         print('NMI = {:.4f} ARI = {:.4f} F = {:.4f}'.format(nmi, ari, f))
@@ -246,7 +254,5 @@ if __name__ == '__main__':
              'mask': mask}
     torch.save(state, f'{path}/{model_name}_model.pth')
 
-    for key, values in clustering_results.items():
-        plot_metric(values, key, path)
-
-    plot_metric(results['train_loss'], 'loss', path)
+    writer.flush()
+    writer.close()

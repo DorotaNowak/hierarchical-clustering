@@ -3,6 +3,7 @@ __pycache__/
 
 results
 data
+runs
 
 slurm-train.sh
 slurm-cluster.sh
