@@ -9,13 +9,12 @@ from thop import profile, clever_format
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from plots import plot_metric
 from cluster import inference, evaluate
 from model import ResNet50, BaseModel, Model, Model2, Model3, Model4, Model5, Model6, Model7
 from loss import binary_loss, instance_loss
 
 
-def get_leaf_to_delete(model, loader, device, iteration):
+def get_leaf_to_delete(model, loader, device, iteration, mask):
     model.eval()
     clusters = np.zeros(16)
 
@@ -29,8 +28,15 @@ def get_leaf_to_delete(model, loader, device, iteration):
         if step % 20 == 0:
             print(f"Step [{step}/{len(loader)}]\t Computing features...")
 
-    print(np.argsort(clusters))
-    return np.argsort(clusters)[iteration] + 15
+    sorted_clusters = np.argsort(clusters)  # 0:15
+    print(mask[15:])
+    print(sorted_clusters)
+    i = 0
+    while True:
+        if mask[sorted_clusters[i] + 15] == 1:
+            print("we are deleting: ", sorted_clusters[i] + 15)
+            return sorted_clusters[i] + 15
+        i += 1
 
 
 def update_mask(mask, leaf):
@@ -64,6 +70,25 @@ def train(net, data_loader, train_optimizer, mask):
         train_bar.set_description('Train Epoch: [{}/{}] Loss: {:.4f}'.format(epoch, epochs, total_loss / total_num))
 
     return total_loss / total_num
+
+
+def run(model, train_loader, optimizer, mask, epoch):
+    train_loss = train(model, train_loader, optimizer, mask)
+    writer.add_scalar("Loss/train", train_loss, epoch)
+    pred, true = inference(test_loader, model, device, mask[first_leaf_idx:all_nodes])
+    nmi, ari, f = evaluate(true, pred)
+    print('NMI = {:.4f} ARI = {:.4f} F = {:.4f}'.format(nmi, ari, f))
+    clustering_results['nmi'].append(nmi)
+    clustering_results['ari'].append(ari)
+    clustering_results['f'].append(f)
+
+    results['train_loss'].append(train_loss)
+    test_acc_1, test_acc_5 = test(model, memory_loader, test_loader)
+    results['test_acc@1'].append(test_acc_1)
+    results['test_acc@5'].append(test_acc_5)
+    # Save statistics
+    # data_frame = pd.DataFrame(data=results, index=range(1, 2+i))
+    # data_frame.to_csv(f'{path}/{save_name_pre}_statistics.csv', index_label='epoch')
 
 
 # Test for one epoch, use weighted knn to find the most similar images' label to assign the test image
@@ -123,6 +148,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', default=500, type=int, help='Number of sweeps over the dataset to train')
     parser.add_argument('--path', default='results', type=str, help='Path to save the model')
     parser.add_argument('--model', default='base', type=str, help='Model to use')
+    parser.add_argument('--tree_height', default=None, type=int, help='The height of a tree to train')
 
     # Arg parse
     args = parser.parse_args()
@@ -148,7 +174,7 @@ if __name__ == '__main__':
     resnet_optimizer = optim.Adam(resnet.parameters(), lr=5e-4, weight_decay=1e-6)
     flops, params = profile(resnet, inputs=(torch.randn(1, 3, 32, 32).cuda(),))
     flops, params = clever_format([flops, params])
-    resnet_path = 'results/exp-2/resnet/128_0.5_200_128_500_500_model.pth'
+    resnet_path = 'results/exp-2/resnet/128_0.5_200_128_500_50_model.pth'
     checkpoint = torch.load(resnet_path)
     resnet.load_state_dict(checkpoint['state_dict'])
     resnet_optimizer.load_state_dict(checkpoint['optimizer'])
@@ -171,7 +197,6 @@ if __name__ == '__main__':
     elif model_type == 'seventh':
         model = Model7(resnet).cuda()
 
-
     flops, params = profile(model, inputs=(torch.randn(1, 3, 32, 32).cuda(),))
     flops, params = clever_format([flops, params])
     print('# Model Params: {} FLOPs: {}'.format(params, flops))
@@ -183,7 +208,19 @@ if __name__ == '__main__':
     results = {'train_loss': [], 'test_acc@1': [], 'test_acc@5': []}
     save_name_pre = f'{feature_dim}_{temperature}_{k}_{batch_size}_{epochs}'
     clustering_results = {'nmi': [], 'ari': [], 'f': []}
-    mask = torch.ones(31).cuda()
+
+    # Find the height of a tree to train
+    if args.tree_height is not None:
+        height = args.tree_height
+    else:
+        height = 1
+        while c > 2 ** height:
+            height += 1
+
+    first_leaf_idx = 2 ** height - 1
+    all_nodes = 2 ** (height + 1) - 1
+    mask = torch.ones(all_nodes).cuda()
+    leaves_to_delete = 2 ** height - c
 
     if not os.path.exists('results'):
         os.mkdir('results')
@@ -191,40 +228,17 @@ if __name__ == '__main__':
     start_epoch = 1
     epochs = 10
     for epoch in range(start_epoch, epochs + 1):
-        train_loss = train(model, train_loader, optimizer, mask)
-        writer.add_scalar("Loss/train", train_loss, epoch)
-        pred, true = inference(test_loader, model, device, mask[15:31])
-        nmi, ari, f = evaluate(true, pred)
-        print('NMI = {:.4f} ARI = {:.4f} F = {:.4f}'.format(nmi, ari, f))
-        clustering_results['nmi'].append(nmi)
-        clustering_results['ari'].append(ari)
-        clustering_results['f'].append(f)
-        results['train_loss'].append(train_loss)
+        run(model, train_loader, optimizer, mask, epoch)
 
     start_epoch = 1
     epochs = 2
     for i in range(6):
         print("Iteration: ", i)
         for epoch in range(start_epoch, epochs + 1):
-            train_loss = train(model, train_loader, optimizer, mask)
-            writer.add_scalar("Loss/train", train_loss, 10 + 2*i + epoch)
-            pred, true = inference(test_loader, model, device, mask[15:31])
-            nmi, ari, f = evaluate(true, pred)
-            print('NMI = {:.4f} ARI = {:.4f} F = {:.4f}'.format(nmi, ari, f))
-            clustering_results['nmi'].append(nmi)
-            clustering_results['ari'].append(ari)
-            clustering_results['f'].append(f)
+            run(model, train_loader, optimizer, mask, 10 + 2 * i + epoch)
 
-            results['train_loss'].append(train_loss)
-            test_acc_1, test_acc_5 = test(model, memory_loader, test_loader)
-            results['test_acc@1'].append(test_acc_1)
-            results['test_acc@5'].append(test_acc_5)
-            # Save statistics
-            # data_frame = pd.DataFrame(data=results, index=range(1, 2+i))
-            # data_frame.to_csv(f'{path}/{save_name_pre}_statistics.csv', index_label='epoch')
-
-        # PRUNING
-        leaf = get_leaf_to_delete(model, memory_loader, 'cuda', i)
+        # Pruning
+        leaf = get_leaf_to_delete(model, memory_loader, 'cuda', i, mask)
         print(leaf)
         mask = update_mask(mask, leaf)
         print(mask)
@@ -238,15 +252,7 @@ if __name__ == '__main__':
     start_epoch = 1
     epochs = 10
     for epoch in range(start_epoch, epochs + 1):
-        train_loss = train(model, train_loader, optimizer, mask)
-        writer.add_scalar("Loss/train", train_loss, 22 + epoch)
-        pred, true = inference(test_loader, model, device, mask[15:31])
-        nmi, ari, f = evaluate(true, pred)
-        print('NMI = {:.4f} ARI = {:.4f} F = {:.4f}'.format(nmi, ari, f))
-        clustering_results['nmi'].append(nmi)
-        clustering_results['ari'].append(ari)
-        clustering_results['f'].append(f)
-        results['train_loss'].append(train_loss)
+        run(model, train_loader, optimizer, mask, 22 + epoch)
 
     model_name = f'{feature_dim}_{temperature}_{k}_{batch_size}_{epochs}_total'
     state = {'state_dict': model.state_dict(),

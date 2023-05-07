@@ -9,6 +9,30 @@ from torch.utils.data import DataLoader, ConcatDataset
 from plots import plot_hist, plot_cluster, plot_confusion_matrix
 from model import ResNet50, BaseModel, Model, Model2, Model3, Model7
 from evaluation import evaluate
+from loss import calculate_probability_level
+from cluster import inference
+
+
+def forward(model, x, node_idx):
+    batch_size = x.shape[0]
+    feature = model.resnet.get_feature(x)
+
+    node_encoded = torch.zeros((batch_size, 15)).to('cuda')  # node_encoded.shape = [bs, 15]
+    node_encoded[:, node_idx] = 1.
+
+    pr = model.transformers(torch.cat((feature, node_encoded), 1))  # transformed.shape = [bs, 2048]
+
+    probabilities = torch.ones((batch_size, 15)).to('cuda')  # probabilities.shape = [bs, 16]
+    probabilities[:, 0] = pr[:, 0]
+
+    for node in range(1, 15):
+        pr = model.transformers(
+            torch.cat((feature, node_encoded), 1))  # [batch_size, 2048]
+        probabilities[:, node] = pr[:, 0]
+
+    probability_vector = calculate_probability_level(probabilities, model.levels)
+    cluster_idx = torch.argmax(probability_vector, dim=1)
+    return cluster_idx, probability_vector
 
 
 def make_histogram(pred, true, classes, bins=16):
@@ -28,7 +52,7 @@ def make_histogram(pred, true, classes, bins=16):
     return list_of_num
 
 
-def inference(loader, model, device, mask):
+def inference_test(loader, model, device, mask, node_idx):
     model.eval()
     feature_vector = []
     labels_vector = []
@@ -38,7 +62,7 @@ def inference(loader, model, device, mask):
         y = z[2]
         x = x.to(device)
         with torch.no_grad():
-            c, probability_vector = model.forward_cluster(x)
+            c, probability_vector = forward(model, x, node_idx)
 
         probability_vector = probability_vector * torch.abs(mask)
         c = torch.argmax(probability_vector, dim=1)
@@ -107,15 +131,14 @@ if __name__ == "__main__":
     classes = ['plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
 
     pred, true = inference(test_loader, model, device, mask)
-
     nmi, ari, f = evaluate(true, pred)
     print('NMI = {:.4f} ARI = {:.4f} F = {:.4f}'.format(nmi, ari, f))
 
-    plot_confusion_matrix(pred, true, results_path)
+    pred, true = inference_test(test_loader, model, device, mask, 0)
+    nmi, ari, f = evaluate(true, pred)
+    print('NMI = {:.4f} ARI = {:.4f} F = {:.4f}'.format(nmi, ari, f))
 
-    for i in range(16):
-        plot_cluster(dataset, pred, i, results_path)
+    pred, true = inference_test(test_loader, model, device, mask, 9)
+    nmi, ari, f = evaluate(true, pred)
+    print('NMI = {:.4f} ARI = {:.4f} F = {:.4f}'.format(nmi, ari, f))
 
-    list_of_num = make_histogram(pred, true, classes)
-    for i in range(16):
-        plot_hist(list_of_num, i, classes, results_path)
