@@ -34,6 +34,36 @@ def mask_correlated_samples(leaves):
     return mask
 
 
+def base_binary_loss(c_i, c_j, node_mask, levels=5):
+    features = torch.cat((c_i, c_j), dim=0) #256x15
+    batch_size = c_i.shape[0] #128
+
+    loss_value = torch.tensor([0], device="cuda", dtype=torch.float32)
+    labels = torch.cat([torch.arange(batch_size) for i in range(2)], dim=0) #256
+    labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
+    labels = labels.to("cuda")
+
+    mask = torch.eye(labels.shape[0], dtype=torch.bool).to("cuda")
+    labels = labels * ~mask #256x256
+
+    for level in range(2, levels + 1):
+        prob_features = calculate_probability_level(features, level) #256x2, 256x4, 256x8,...
+        prob_features = prob_features * torch.abs(
+            node_mask[2 ** (level - 1) - 1: 2 ** level - 1])  #
+        # Calculate loss on positive classes
+        # To avoid nan while calculating sqrt https://discuss.pytorch.org/t/runtimeerror-function-sqrtbackward-returned-nan-values-in-its-0th-output/48702  https://github.com/richzhang/PerceptualSimilarity/issues/69
+        loss_value -= torch.mean((torch.bmm(
+            torch.sqrt(prob_features[torch.where(labels > 0)[0]].unsqueeze(1) + 1e-8),
+            torch.sqrt(prob_features[torch.where(labels > 0)[1]].unsqueeze(2) + 1e-8))))
+        # Calculate loss on negative classes
+        loss_value += torch.mean((torch.bmm(
+            torch.sqrt(prob_features[torch.where(labels == 0)[0]].unsqueeze(1) + 1e-8),
+            torch.sqrt(prob_features[torch.where(labels == 0)[1]].unsqueeze(2) + 1e-8))))
+
+    return loss_value
+
+
+
 def binary_loss(c_i, c_j, node_mask, levels=5, temperature=1.0):
     criterion = nn.CrossEntropyLoss(reduction="sum")
     total_loss = 0

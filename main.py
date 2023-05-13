@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from cluster import inference, evaluate
 from model import ResNet50, BaseModel, Model, Model2, Model3, Model4, Model5, Model6, Model7
-from loss import binary_loss, instance_loss
+from loss import binary_loss, base_binary_loss, instance_loss
 
 
 def get_leaf_to_delete(model, loader, device, iteration, mask):
@@ -59,7 +59,7 @@ def train(net, data_loader, train_optimizer, mask):
         feature_1, out_1, c_1 = net(pos_1)
         feature_2, out_2, c_2 = net(pos_2)
         feature_loss = instance_loss(out_1, out_2)
-        cluster_loss = binary_loss(c_1, c_2, mask)
+        cluster_loss = base_binary_loss(c_1, c_2, mask)
         loss = feature_loss + cluster_loss
         train_optimizer.zero_grad()
         loss.backward()
@@ -174,7 +174,7 @@ if __name__ == '__main__':
     resnet_optimizer = optim.Adam(resnet.parameters(), lr=5e-4, weight_decay=1e-6)
     flops, params = profile(resnet, inputs=(torch.randn(1, 3, 32, 32).cuda(),))
     flops, params = clever_format([flops, params])
-    resnet_path = 'results/exp-2/resnet/128_0.5_200_128_500_50_model.pth'
+    resnet_path = 'results/exp-2/resnet/128_0.5_200_128_500_500_model.pth'
     checkpoint = torch.load(resnet_path)
     resnet.load_state_dict(checkpoint['state_dict'])
     resnet_optimizer.load_state_dict(checkpoint['optimizer'])
