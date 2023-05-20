@@ -1,38 +1,70 @@
-from PIL import Image
-from torchvision import transforms
-from torchvision.datasets import CIFAR10
-
-mean = [0.4914, 0.4822, 0.4465]
-std = [0.2023, 0.1994, 0.2010]
+from torchvision import transforms, datasets
 
 
-class CIFAR10Pair(CIFAR10):
+class SimCLRView:
+    def __init__(self, transform):
+        self.transform = transform
+
+    def __call__(self, x):
+        """Retrieves two transformed versions of an image and its label at the specified index."""
+
+        return self.transform(x), self.transform(x)
+
+
+class SimCLRDataset:
+    """A class representing a dataset for contrastive learning.
+
+    Args:
+        train (bool): If True, creates dataset from ``training.pt``, otherwise from ``test.pt``.
+        dataset_name (str): The name of the dataset. Valid values: 'cifar10', 'mnist', 'imagenet10'.
+        transform_name (str): The name of the transform to apply. Valid values: 'train', 'test'.
     """
-    CIFAR-10 dataset
-    """
 
-    def __getitem__(self, index):
-        img, target = self.data[index], self.targets[index]
-        img = Image.fromarray(img)
+    def __init__(self, dataset_name, transform_name, train):
+        self.dataset_name = dataset_name
+        self.transform_name = transform_name
+        self.train = train
 
-        if self.transform is not None:
-            pos_1 = self.transform(img)
-            pos_2 = self.transform(img)
+    def get_transformations(self, crop_size, mean, std):
+        """Return a set of data augmentations."""
 
-        if self.target_transform is not None:
-            target = self.target_transform(target)
+        if self.transform_name == 'train':
+            transform = transforms.Compose([
+                transforms.RandomResizedCrop(crop_size),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+                transforms.RandomGrayscale(p=0.5),
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std)
+            ])
+        elif self.transform_name == 'test':
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std)])
+        else:
+            raise ValueError("Invalid transform name.")
 
-        return pos_1, pos_2, target
+        return transform
 
+    def get_dataset(self):
+        """Get the specified dataset."""
 
-train_transform = transforms.Compose([
-    transforms.RandomResizedCrop(32),
-    transforms.RandomHorizontalFlip(p=0.5),
-    transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
-    transforms.RandomGrayscale(p=0.5),
-    transforms.ToTensor(),
-    transforms.Normalize(mean, std)])
+        if self.dataset_name == "cifar10":
+            mean = [0.4914, 0.4822, 0.4465]
+            std = [0.2023, 0.1994, 0.2010]
+            dataset = datasets.CIFAR10(root='./data/cifar10', train=self.train, download=True,
+                                       transform=SimCLRView(self.get_transformations(32, mean, std)))
+        elif self.dataset_name == "mnist":
+            mean = [0.1307]
+            std = [0.3081]
+            dataset = datasets.MNIST(root='./data/mnist', train=self.train, download=True,
+                                     transform=SimCLRView(self.get_transformations(28, mean, std)))
+        elif self.dataset_name == "imagenet10":
+            mean = [0.485, 0.456, 0.406]
+            std = [0.229, 0.224, 0.225]
+            dataset = datasets.ImageNet(root='/shared/sets/datasets/vision/ImageNet', split='train',
+                                        transform=SimCLRView(self.get_transformations(224, mean, std)))
+        else:
+            raise ValueError("Invalid dataset name.")
 
-test_transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize(mean, std)])
+        return dataset

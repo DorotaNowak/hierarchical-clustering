@@ -161,12 +161,12 @@ if __name__ == '__main__':
     writer = SummaryWriter()
 
     # Prepare the data
-    train_data = utils.CIFAR10Pair(root='data', train=True, transform=utils.train_transform, download=True)
+    train_data = utils.SimCLRDataset(dataset_name, 'train', True).get_dataset()
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True,
                               drop_last=True)
-    memory_data = utils.CIFAR10Pair(root='data', train=True, transform=utils.test_transform, download=True)
+    memory_data = utils.SimCLRDataset(dataset_name, 'test', True).get_dataset()
     memory_loader = DataLoader(memory_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
-    test_data = utils.CIFAR10Pair(root='data', train=False, transform=utils.test_transform, download=True)
+    test_data = utils.SimCLRDataset(dataset_name, 'test', False).get_dataset()
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
 
     # Backbone model
