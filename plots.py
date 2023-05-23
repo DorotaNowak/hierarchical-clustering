@@ -4,8 +4,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from sklearn.metrics import confusion_matrix
-from utils import mean, std
 
+mean = [0.4914, 0.4822, 0.4465]
+std = [0.2023, 0.1994, 0.2010]
 
 def imshow(img):
     for channel in range(3):
@@ -25,6 +26,7 @@ def plot_cluster(dataset, classes, idx, path):
         imshow(torchvision.utils.make_grid(images))
         plt.title(f"Cluster {idx}")
         plt.savefig(f"{path}/plots/images_{idx}.png")
+
 
 
 def plot_hist(clusters, idx, classes, path):

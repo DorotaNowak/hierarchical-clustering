@@ -3,7 +3,6 @@ import utils
 import argparse
 import torch
 import torch.optim as optim
-from thop import profile
 from torch.utils.data import DataLoader, ConcatDataset
 
 from plots import plot_hist, plot_cluster, plot_confusion_matrix
@@ -34,8 +33,8 @@ def inference(loader, model, device, mask):
     labels_vector = []
 
     for step, z in enumerate(loader):
-        x = z[0]
-        y = z[2]
+        x = z[0][0]
+        y = z[1]
         x = x.to(device)
         with torch.no_grad():
             c, probability_vector = model.forward_cluster(x)
@@ -57,6 +56,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     parser = argparse.ArgumentParser(description='Train SimCLR')
+    parser.add_argument('--dataset_name', default=None, type=str, help='Name of the dataset')
     parser.add_argument('--feature_dim', default=128, type=int, help='Feature dim for latent vector')
     parser.add_argument('--temperature', default=0.5, type=float, help='Temperature used in softmax')
     parser.add_argument('--k', default=200, type=int, help='Top k most similar images used to predict the label')
@@ -68,6 +68,7 @@ if __name__ == "__main__":
 
     # Parse args
     args = parser.parse_args()
+    dataset_name = args.dataset_name.lower()
     feature_dim, temperature, k = args.feature_dim, args.temperature, args.k
     batch_size, epochs = args.batch_size, args.epochs
     path = args.path
@@ -75,8 +76,8 @@ if __name__ == "__main__":
     model_type = args.model
 
     # Prepare the data
-    train_data = utils.CIFAR10Pair(root='data', train=True, transform=utils.test_transform, download=True)
-    test_data = utils.CIFAR10Pair(root='data', train=False, transform=utils.test_transform, download=True)
+    train_data = utils.SimCLRDataset(dataset_name, 'train', True).get_dataset()
+    test_data = utils.SimCLRDataset(dataset_name, 'test', False).get_dataset()
     dataset = ConcatDataset([train_data, test_data])
     test_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
 
@@ -94,7 +95,6 @@ if __name__ == "__main__":
     elif model_type == 'seventh':
         model = Model7(resnet).cuda()
 
-    flops, params = profile(model, inputs=(torch.randn(1, 3, 32, 32).cuda(),))
     optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-6)
     checkpoint = torch.load(path)
     model.load_state_dict(checkpoint['state_dict'])
@@ -111,6 +111,7 @@ if __name__ == "__main__":
     nmi, ari, f = evaluate(true, pred)
     print('NMI = {:.4f} ARI = {:.4f} F = {:.4f}'.format(nmi, ari, f))
 
+
     plot_confusion_matrix(pred, true, results_path)
 
     for i in range(16):
@@ -119,3 +120,4 @@ if __name__ == "__main__":
     list_of_num = make_histogram(pred, true, classes)
     for i in range(16):
         plot_hist(list_of_num, i, classes, results_path)
+

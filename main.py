@@ -2,10 +2,10 @@ import argparse
 import os
 import utils
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 import torch
 import torch.optim as optim
-from thop import profile, clever_format
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
@@ -14,12 +14,12 @@ from model import ResNet50, BaseModel, Model, Model2, Model3, Model4, Model5, Mo
 from loss import binary_loss, base_binary_loss, instance_loss
 
 
-def get_leaf_to_delete(model, loader, device, iteration, mask):
+def get_leaf_to_delete(model, loader, device, mask):
     model.eval()
     clusters = np.zeros(16)
 
     for step, z in enumerate(loader):
-        x = z[0]
+        x = z[0][0]
         x = x.to(device)
         with torch.no_grad():
             c, probabilities = model.forward_cluster(x)
@@ -34,7 +34,7 @@ def get_leaf_to_delete(model, loader, device, iteration, mask):
     i = 0
     while True:
         if mask[sorted_clusters[i] + 15] == 1:
-            print("we are deleting: ", sorted_clusters[i] + 15)
+            print(f"Cluster to delete: {sorted_clusters[i]}")
             return sorted_clusters[i] + 15
         i += 1
 
@@ -50,16 +50,17 @@ def update_mask(mask, leaf):
     return mask
 
 
-# Train for one epoch to learn unique features
-def train(net, data_loader, train_optimizer, mask):
+# Train for one epoch
+def train(net, data_loader, train_optimizer, mask, temperature, batch_size, epoch):
     net.train()
     total_loss, total_num, train_bar = 0.0, 0, tqdm(data_loader)
-    for pos_1, pos_2, target in train_bar:
+    total_feature_loss, total_cluster_loss = 0.0, 0.0
+    for (pos_1, pos_2), target in train_bar:
         pos_1, pos_2 = pos_1.cuda(non_blocking=True), pos_2.cuda(non_blocking=True)
         feature_1, out_1, c_1 = net(pos_1)
         feature_2, out_2, c_2 = net(pos_2)
-        feature_loss = instance_loss(out_1, out_2)
-        cluster_loss = base_binary_loss(c_1, c_2, mask)
+        feature_loss = instance_loss(out_1, out_2, temperature, batch_size)
+        cluster_loss = binary_loss(c_1, c_2, mask)
         loss = feature_loss + cluster_loss
         train_optimizer.zero_grad()
         loss.backward()
@@ -67,28 +68,38 @@ def train(net, data_loader, train_optimizer, mask):
 
         total_num += batch_size
         total_loss += loss.item() * batch_size
+        total_feature_loss += feature_loss.item() * batch_size
+        total_cluster_loss += cluster_loss.item() * batch_size
         train_bar.set_description('Train Epoch: [{}/{}] Loss: {:.4f}'.format(epoch, epochs, total_loss / total_num))
 
-    return total_loss / total_num
+    return total_loss / total_num, total_feature_loss / total_num, total_cluster_loss / total_num
 
 
-def run(model, train_loader, optimizer, mask, epoch):
-    train_loss = train(model, train_loader, optimizer, mask)
-    writer.add_scalar("Loss/train", train_loss, epoch)
+def run(model, train_loader, optimizer, mask, total_epoch, temperature, batch_size, epoch):
+    train_loss, feature_loss, cluster_loss = train(model, train_loader, optimizer, mask, temperature, batch_size, epoch)
+    results['train_loss'].append(train_loss)
+    writer.add_scalar("Loss/train", train_loss, total_epoch)
+    writer.add_scalar("Loss/instance_loss", feature_loss, total_epoch)
+    writer.add_scalar("Loss/cluster_loss", cluster_loss, total_epoch)
+
     pred, true = inference(test_loader, model, device, mask[first_leaf_idx:all_nodes])
     nmi, ari, f = evaluate(true, pred)
     print('NMI = {:.4f} ARI = {:.4f} F = {:.4f}'.format(nmi, ari, f))
     clustering_results['nmi'].append(nmi)
     clustering_results['ari'].append(ari)
     clustering_results['f'].append(f)
+    writer.add_scalar("Metrics/nmi", nmi, total_epoch)
+    writer.add_scalar("Metrics/ari", ari, total_epoch)
+    writer.add_scalar("Metrics/f", f, total_epoch)
 
-    results['train_loss'].append(train_loss)
     test_acc_1, test_acc_5 = test(model, memory_loader, test_loader)
     results['test_acc@1'].append(test_acc_1)
+    writer.add_scalar("Accuracy/@1", test_acc_1, total_epoch)
     results['test_acc@5'].append(test_acc_5)
+    writer.add_scalar("Accuracy/@5", test_acc_5, total_epoch)
     # Save statistics
-    # data_frame = pd.DataFrame(data=results, index=range(1, 2+i))
-    # data_frame.to_csv(f'{path}/{save_name_pre}_statistics.csv', index_label='epoch')
+    data_frame = pd.DataFrame(data=results, index=range(1, total_epoch+1))
+    data_frame.to_csv(f'{path}/{save_name_pre}_statistics.csv', index_label='total_epoch')
 
 
 # Test for one epoch, use weighted knn to find the most similar images' label to assign the test image
@@ -97,7 +108,7 @@ def test(net, memory_data_loader, test_data_loader):
     total_top1, total_top5, total_num, feature_bank = 0.0, 0.0, 0, []
     with torch.no_grad():
         # Generate feature bank
-        for data, _, target in tqdm(memory_data_loader, desc='Feature extracting'):
+        for (data, _), target in tqdm(memory_data_loader, desc='Feature extracting'):
             feature, out, ci = net(data.cuda(non_blocking=True))
             feature_bank.append(feature)
         # [D, N]
@@ -106,7 +117,7 @@ def test(net, memory_data_loader, test_data_loader):
         feature_labels = torch.tensor(memory_data_loader.dataset.targets, device=feature_bank.device)
         # Loop test data to predict the label by weighted knn search
         test_bar = tqdm(test_data_loader)
-        for data, _, target in test_bar:
+        for (data, _), target in test_bar:
             data, target = data.cuda(non_blocking=True), target.cuda(non_blocking=True)
             feature, out, ci = net(data)
 
@@ -141,24 +152,27 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     parser = argparse.ArgumentParser(description='Train SimCLR')
+    parser.add_argument('--dataset_name', default=None, type=str, help='Name of the dataset')
     parser.add_argument('--feature_dim', default=128, type=int, help='Feature dim for latent vector')
     parser.add_argument('--temperature', default=0.5, type=float, help='Temperature used in softmax')
     parser.add_argument('--k', default=200, type=int, help='Top k most similar images used to predict the label')
     parser.add_argument('--batch_size', default=128, type=int, help='Number of images in each mini-batch')
-    parser.add_argument('--epochs', default=500, type=int, help='Number of sweeps over the dataset to train')
-    parser.add_argument('--path', default='results', type=str, help='Path to save the model')
+    parser.add_argument('--epochs', default=10, type=int, help='Number of epochs to train combined model')
+    parser.add_argument('--pruning_epochs', default=2, type=int, help='Number of epochs to train between pruning steps')
+    parser.add_argument('--path', default=None, type=str, help='Path to save the model')
     parser.add_argument('--model', default='base', type=str, help='Model to use')
     parser.add_argument('--tree_height', default=None, type=int, help='The height of a tree to train')
 
     # Arg parse
     args = parser.parse_args()
+    dataset_name = args.dataset_name.lower()
     feature_dim, temperature, k = args.feature_dim, args.temperature, args.k
-    batch_size, epochs = args.batch_size, args.epochs
+    batch_size, epochs, pruning_epochs = args.batch_size, args.epochs, args.pruning_epochs
     path = args.path
     model_type = args.model
 
     # Initialize summary writer
-    writer = SummaryWriter()
+    writer = SummaryWriter(log_dir=f"runs/{dataset_name}/{model_type}")
 
     # Prepare the data
     train_data = utils.SimCLRDataset(dataset_name, 'train', True).get_dataset()
@@ -170,11 +184,9 @@ if __name__ == '__main__':
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
 
     # Backbone model
-    resnet = ResNet50().cuda()
+    resnet = ResNet50(dataset_name, feature_dim).cuda()
     resnet_optimizer = optim.Adam(resnet.parameters(), lr=5e-4, weight_decay=1e-6)
-    flops, params = profile(resnet, inputs=(torch.randn(1, 3, 32, 32).cuda(),))
-    flops, params = clever_format([flops, params])
-    resnet_path = 'results/exp-2/resnet/128_0.5_200_128_500_500_model.pth'
+    resnet_path = f'results/{dataset_name}/resnet/128_0.5_200_128_1000_500_model.pth'
     checkpoint = torch.load(resnet_path)
     resnet.load_state_dict(checkpoint['state_dict'])
     resnet_optimizer.load_state_dict(checkpoint['optimizer'])
@@ -197,9 +209,6 @@ if __name__ == '__main__':
     elif model_type == 'seventh':
         model = Model7(resnet).cuda()
 
-    flops, params = profile(model, inputs=(torch.randn(1, 3, 32, 32).cuda(),))
-    flops, params = clever_format([flops, params])
-    print('# Model Params: {} FLOPs: {}'.format(params, flops))
     optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-6)
 
     c = len(memory_data.classes)
@@ -209,7 +218,7 @@ if __name__ == '__main__':
     save_name_pre = f'{feature_dim}_{temperature}_{k}_{batch_size}_{epochs}'
     clustering_results = {'nmi': [], 'ari': [], 'f': []}
 
-    # Find the height of a tree to train
+    # Find the height of a tree to train starting from 0
     if args.tree_height is not None:
         height = args.tree_height
     else:
@@ -217,31 +226,39 @@ if __name__ == '__main__':
         while c > 2 ** height:
             height += 1
 
+    # Find the first leaf index, from root = 0
     first_leaf_idx = 2 ** height - 1
     all_nodes = 2 ** (height + 1) - 1
     mask = torch.ones(all_nodes).cuda()
     leaves_to_delete = 2 ** height - c
 
-    if not os.path.exists('results'):
-        os.mkdir('results')
+    # Path to save the results
+    if path is None:
+        path = f'results/{dataset_name}/{model_type}'
 
-    start_epoch = 1
-    epochs = 10
-    for epoch in range(start_epoch, epochs + 1):
-        run(model, train_loader, optimizer, mask, epoch)
+    if not os.path.exists(path):
+        os.makedirs(path)
 
-    start_epoch = 1
-    epochs = 2
-    for i in range(6):
-        print("Iteration: ", i)
-        for epoch in range(start_epoch, epochs + 1):
-            run(model, train_loader, optimizer, mask, 10 + 2 * i + epoch)
+    total_epochs = 0
 
-        # Pruning
-        leaf = get_leaf_to_delete(model, memory_loader, 'cuda', i, mask)
-        print(leaf)
+    # Train loop
+    for epoch in range(1, epochs + 1):
+        total_epochs += 1
+        run(model, train_loader, optimizer, mask, total_epochs, temperature, batch_size, epoch)
+
+    # Pruning
+    for i in range(leaves_to_delete):
+        print(f"Iteration {i}")
+        for epoch in range(1, pruning_epochs + 1):
+            total_epochs += 1
+            print(total_epochs)
+            run(model, train_loader, optimizer, mask, total_epochs, temperature, batch_size, epoch)
+
+        leaf = get_leaf_to_delete(model, memory_loader, 'cuda', mask)
+        print(f"Leaf to delete: {leaf}")
+
         mask = update_mask(mask, leaf)
-        print(mask)
+        print(f"Mask:\n {mask}")
 
         model_name = f'{feature_dim}_{temperature}_{k}_{batch_size}_{epochs}_{i}'
         state = {'state_dict': model.state_dict(),
@@ -249,10 +266,9 @@ if __name__ == '__main__':
                  'mask': mask}
         torch.save(state, f'{path}/{model_name}_model.pth')
 
-    start_epoch = 1
-    epochs = 10
-    for epoch in range(start_epoch, epochs + 1):
-        run(model, train_loader, optimizer, mask, 22 + epoch)
+    for epoch in range(1, epochs + 1):
+        total_epochs += 1
+        run(model, train_loader, optimizer, mask, total_epochs, temperature, batch_size, epoch)
 
     model_name = f'{feature_dim}_{temperature}_{k}_{batch_size}_{epochs}_total'
     state = {'state_dict': model.state_dict(),

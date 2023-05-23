@@ -25,6 +25,18 @@ class SimCLRDataset:
         self.transform_name = transform_name
         self.train = train
 
+        if dataset_name == "cifar10":
+            self.mean = [0.4914, 0.4822, 0.4465]
+            self.std = [0.2023, 0.1994, 0.2010]
+        elif dataset_name == "mnist":
+            self.mean = [0.1307]
+            self.std = [0.3081]
+        elif dataset_name == "imagenet10":
+            self.mean = [0.485, 0.456, 0.406]
+            self.std = [0.229, 0.224, 0.225]
+        else:
+            raise ValueError("Invalid dataset name.")
+
     def get_transformations(self, crop_size, mean, std):
         """Return a set of data augmentations."""
 
@@ -50,20 +62,14 @@ class SimCLRDataset:
         """Get the specified dataset."""
 
         if self.dataset_name == "cifar10":
-            mean = [0.4914, 0.4822, 0.4465]
-            std = [0.2023, 0.1994, 0.2010]
             dataset = datasets.CIFAR10(root='./data/cifar10', train=self.train, download=True,
-                                       transform=SimCLRView(self.get_transformations(32, mean, std)))
+                                       transform=SimCLRView(self.get_transformations(32, self.mean, self.std)))
         elif self.dataset_name == "mnist":
-            mean = [0.1307]
-            std = [0.3081]
             dataset = datasets.MNIST(root='./data/mnist', train=self.train, download=True,
-                                     transform=SimCLRView(self.get_transformations(28, mean, std)))
+                                     transform=SimCLRView(self.get_transformations(28, self.mean, self.std)))
         elif self.dataset_name == "imagenet10":
-            mean = [0.485, 0.456, 0.406]
-            std = [0.229, 0.224, 0.225]
             dataset = datasets.ImageNet(root='/shared/sets/datasets/vision/ImageNet', split='train',
-                                        transform=SimCLRView(self.get_transformations(224, mean, std)))
+                                        transform=SimCLRView(self.get_transformations(224, self.mean, self.std)))
         else:
             raise ValueError("Invalid dataset name.")
 
