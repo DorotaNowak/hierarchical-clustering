@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from cluster import inference, evaluate
-from model import ResNet50, BaseModel, Model, Model2, Model3, Model4, Model5, Model6, Model7
+from model import ResNet50, BaseModel, Model2, Model3, Model4, Model6, Model7
 from loss import binary_loss, base_binary_loss, instance_loss
 
 
@@ -85,9 +85,9 @@ def run(model, train_loader, optimizer, mask, total_epoch, temperature, batch_si
     pred, true = inference(test_loader, model, device, mask[first_leaf_idx:all_nodes])
     nmi, ari, f = evaluate(true, pred)
     print('NMI = {:.4f} ARI = {:.4f} F = {:.4f}'.format(nmi, ari, f))
-    clustering_results['nmi'].append(nmi)
-    clustering_results['ari'].append(ari)
-    clustering_results['f'].append(f)
+    results['nmi'].append(nmi)
+    results['ari'].append(ari)
+    results['f'].append(f)
     writer.add_scalar("Metrics/nmi", nmi, total_epoch)
     writer.add_scalar("Metrics/ari", ari, total_epoch)
     writer.add_scalar("Metrics/f", f, total_epoch)
@@ -183,6 +183,17 @@ if __name__ == '__main__':
     test_data = utils.SimCLRDataset(dataset_name, 'test', False).get_dataset()
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
 
+    # Find the height of a tree to train starting from 0
+    c = len(memory_data.classes)
+    if args.tree_height is not None:
+        height = args.tree_height
+    else:
+        height = 1
+        while c > 2 ** height:
+            height += 1
+    print(f'Tree height: {height}')
+    levels = height + 1
+
     # Backbone model
     resnet = ResNet50(dataset_name, feature_dim).cuda()
     resnet_optimizer = optim.Adam(resnet.parameters(), lr=5e-4, weight_decay=1e-6)
@@ -193,38 +204,23 @@ if __name__ == '__main__':
 
     # Main model
     if model_type == 'base':
-        model = BaseModel(resnet).cuda()
-    elif model_type == 'first':
-        model = Model(resnet).cuda()
-    elif model_type == 'second':
-        model = Model2(resnet).cuda()
-    elif model_type == 'third':
-        model = Model3(resnet).cuda()
-    elif model_type == 'fourth':
-        model = Model4(resnet).cuda()
-    elif model_type == 'fifth':
-        model = Model5(resnet).cuda()
-    elif model_type == 'sixth':
-        model = Model6(resnet).cuda()
-    elif model_type == 'seventh':
-        model = Model7(resnet).cuda()
+        model = BaseModel(resnet, levels).cuda()
+    elif model_type == 'model2':
+        model = Model2(resnet, levels).cuda()
+    elif model_type == 'model3':
+        model = Model3(resnet, levels).cuda()
+    elif model_type == 'model4':
+        model = Model4(resnet, levels).cuda()
+    elif model_type == 'model6':
+        model = Model6(resnet, levels).cuda()
+    elif model_type == 'model7':
+        model = Model7(resnet, levels).cuda()
 
     optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-6)
 
-    c = len(memory_data.classes)
-
     # Training loop
-    results = {'train_loss': [], 'test_acc@1': [], 'test_acc@5': []}
+    results = {'train_loss': [], 'test_acc@1': [], 'test_acc@5': [], 'nmi': [], 'ari': [], 'f': []}
     save_name_pre = f'{feature_dim}_{temperature}_{k}_{batch_size}_{epochs}'
-    clustering_results = {'nmi': [], 'ari': [], 'f': []}
-
-    # Find the height of a tree to train starting from 0
-    if args.tree_height is not None:
-        height = args.tree_height
-    else:
-        height = 1
-        while c > 2 ** height:
-            height += 1
 
     # Find the first leaf index, from root = 0
     first_leaf_idx = 2 ** height - 1

@@ -6,7 +6,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, ConcatDataset
 
 from plots import plot_hist, plot_cluster, plot_confusion_matrix
-from model import ResNet50, BaseModel, Model, Model2, Model3, Model7
+from model import ResNet50, BaseModel, Model2, Model3, Model4, Model6, Model7
 from evaluation import evaluate
 
 
@@ -81,19 +81,31 @@ if __name__ == "__main__":
     dataset = ConcatDataset([train_data, test_data])
     test_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
 
+    c = len(test_data.classes)
+    if args.tree_height is not None:
+        height = args.tree_height
+    else:
+        height = 1
+        while c > 2 ** height:
+            height += 1
+    print(f'Tree height: {height}')
+
     # Load the model
     resnet = ResNet50().cuda()
 
+    # Main model
     if model_type == 'base':
-        model = BaseModel(resnet).cuda()
-    elif model_type == 'first':
-        model = Model(resnet).cuda()
-    elif model_type == 'second':
-        model = Model2(resnet).cuda()
-    elif model_type == 'third':
-        model = Model3(resnet).cuda()
-    elif model_type == 'seventh':
-        model = Model7(resnet).cuda()
+        model = BaseModel(resnet, height).cuda()
+    elif model_type == '2':
+        model = Model2(resnet, height).cuda()
+    elif model_type == '3':
+        model = Model3(resnet, height).cuda()
+    elif model_type == '4':
+        model = Model4(resnet, height).cuda()
+    elif model_type == '6':
+        model = Model6(resnet, height).cuda()
+    elif model_type == '7':
+        model = Model7(resnet, height).cuda()
 
     optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-6)
     checkpoint = torch.load(path)
