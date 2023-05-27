@@ -1,14 +1,13 @@
 import os
 import torchvision
 import matplotlib.pyplot as plt
+import scienceplots
 import numpy as np
 import seaborn as sns
 from sklearn.metrics import confusion_matrix
 
-mean = [0.4914, 0.4822, 0.4465]
-std = [0.2023, 0.1994, 0.2010]
 
-def imshow(img):
+def imshow(img, mean, std):
     for channel in range(3):
         img[channel] = (img[channel] * std[channel]) + mean[channel]
     print(img.max())
@@ -17,16 +16,15 @@ def imshow(img):
     plt.imshow(np.transpose(npimg, (1, 2, 0)))
 
 
-def plot_cluster(dataset, classes, idx, path):
+def plot_cluster(dataset, classes, idx, path, mean, std):
     plt.clf()
     idxs = [i for i, j in enumerate(classes) if j == idx]
     idxs = idxs[:40]
-    images = [dataset[i][0] for i in idxs]
+    images = [dataset[i][0][0] for i in idxs]
     if len(images) > 0:
-        imshow(torchvision.utils.make_grid(images))
+        imshow(torchvision.utils.make_grid(images), mean, std)
         plt.title(f"Cluster {idx}")
         plt.savefig(f"{path}/plots/images_{idx}.png")
-
 
 
 def plot_hist(clusters, idx, classes, path):
