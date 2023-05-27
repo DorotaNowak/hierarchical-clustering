@@ -1,34 +1,76 @@
-from PIL import Image
-from torchvision import transforms
-from torchvision.datasets import CIFAR10
+from torchvision import transforms, datasets
 
 
-class CIFAR10Pair(CIFAR10):
-    """CIFAR10 Dataset.
+class SimCLRView:
+    def __init__(self, transform):
+        self.transform = transform
+
+    def __call__(self, x):
+        """Retrieves two transformed versions of an image and its label at the specified index."""
+
+        return self.transform(x), self.transform(x)
+
+
+class SimCLRDataset:
+    """A class representing a dataset for contrastive learning.
+
+    Args:
+        train (bool): If True, creates dataset from ``training.pt``, otherwise from ``test.pt``.
+        dataset_name (str): The name of the dataset. Valid values: 'cifar10', 'mnist', 'imagenet10'.
+        transform_name (str): The name of the transform to apply. Valid values: 'train', 'test'.
     """
 
-    def __getitem__(self, index):
-        img, target = self.data[index], self.targets[index]
-        img = Image.fromarray(img)
+    def __init__(self, dataset_name, transform_name, train):
+        self.dataset_name = dataset_name
+        self.transform_name = transform_name
+        self.train = train
 
-        if self.transform is not None:
-            pos_1 = self.transform(img)
-            pos_2 = self.transform(img)
+        if dataset_name == "cifar10":
+            self.mean = [0.4914, 0.4822, 0.4465]
+            self.std = [0.2023, 0.1994, 0.2010]
+        elif dataset_name == "mnist":
+            self.mean = [0.1307]
+            self.std = [0.3081]
+        elif dataset_name == "imagenet10":
+            self.mean = [0.485, 0.456, 0.406]
+            self.std = [0.229, 0.224, 0.225]
+        else:
+            raise ValueError("Invalid dataset name.")
 
-        if self.target_transform is not None:
-            target = self.target_transform(target)
+    def get_transformations(self, crop_size, mean, std):
+        """Return a set of data augmentations."""
 
-        return pos_1, pos_2, target
+        if self.transform_name == 'train':
+            transform = transforms.Compose([
+                transforms.RandomResizedCrop(crop_size),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+                transforms.RandomGrayscale(p=0.5),
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std)
+            ])
+        elif self.transform_name == 'test':
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std)])
+        else:
+            raise ValueError("Invalid transform name.")
 
+        return transform
 
-train_transform = transforms.Compose([
-    transforms.RandomResizedCrop(32),
-    transforms.RandomHorizontalFlip(p=0.5),
-    transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
-    transforms.RandomGrayscale(p=0.2),
-    transforms.ToTensor(),
-    transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])])
+    def get_dataset(self):
+        """Get the specified dataset."""
 
-test_transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])])
+        if self.dataset_name == "cifar10":
+            dataset = datasets.CIFAR10(root='./data/cifar10', train=self.train, download=True,
+                                       transform=SimCLRView(self.get_transformations(32, self.mean, self.std)))
+        elif self.dataset_name == "mnist":
+            dataset = datasets.MNIST(root='./data/mnist', train=self.train, download=True,
+                                     transform=SimCLRView(self.get_transformations(28, self.mean, self.std)))
+        elif self.dataset_name == "imagenet10":
+            dataset = datasets.ImageNet(root='/shared/sets/datasets/vision/ImageNet', split='train',
+                                        transform=SimCLRView(self.get_transformations(224, self.mean, self.std)))
+        else:
+            raise ValueError("Invalid dataset name.")
+
+        return dataset
