@@ -51,7 +51,7 @@ def update_mask(mask, leaf):
 
 
 # Train for one epoch
-def train(net, data_loader, train_optimizer, mask, temperature, batch_size, epoch):
+def train(net, data_loader, train_optimizer, mask, temperature, batch_size, epoch, epochs):
     net.train()
     total_loss, total_num, train_bar = 0.0, 0, tqdm(data_loader)
     total_feature_loss, total_cluster_loss = 0.0, 0.0
@@ -75,8 +75,8 @@ def train(net, data_loader, train_optimizer, mask, temperature, batch_size, epoc
     return total_loss / total_num, total_feature_loss / total_num, total_cluster_loss / total_num
 
 
-def run(model, train_loader, optimizer, mask, total_epoch, temperature, batch_size, epoch):
-    train_loss, feature_loss, cluster_loss = train(model, train_loader, optimizer, mask, temperature, batch_size, epoch)
+def run(model, train_loader, optimizer, mask, total_epoch, temperature, batch_size, epoch, epochs):
+    train_loss, feature_loss, cluster_loss = train(model, train_loader, optimizer, mask, temperature, batch_size, epoch, epochs)
     results['train_loss'].append(train_loss)
     writer.add_scalar("Loss/train", train_loss, total_epoch)
     writer.add_scalar("Loss/instance_loss", feature_loss, total_epoch)
@@ -92,7 +92,7 @@ def run(model, train_loader, optimizer, mask, total_epoch, temperature, batch_si
     writer.add_scalar("Metrics/ari", ari, total_epoch)
     writer.add_scalar("Metrics/f", f, total_epoch)
 
-    test_acc_1, test_acc_5 = test(model, memory_loader, test_loader)
+    test_acc_1, test_acc_5 = test(model, memory_loader, test_loader, epochs)
     results['test_acc@1'].append(test_acc_1)
     writer.add_scalar("Accuracy/@1", test_acc_1, total_epoch)
     results['test_acc@5'].append(test_acc_5)
@@ -103,7 +103,7 @@ def run(model, train_loader, optimizer, mask, total_epoch, temperature, batch_si
 
 
 # Test for one epoch, use weighted knn to find the most similar images' label to assign the test image
-def test(net, memory_data_loader, test_data_loader):
+def test(net, memory_data_loader, test_data_loader, epochs):
     net.eval()
     total_top1, total_top5, total_num, feature_bank = 0.0, 0.0, 0, []
     with torch.no_grad():
@@ -197,7 +197,7 @@ if __name__ == '__main__':
     # Backbone model
     resnet = ResNet50(dataset_name, feature_dim).cuda()
     resnet_optimizer = optim.Adam(resnet.parameters(), lr=5e-4, weight_decay=1e-6)
-    resnet_path = f'results/{dataset_name}/resnet/128_0.5_200_128_1000_500_model.pth'
+    resnet_path = f'results/{dataset_name}/resnet/128_0.5_200_128_500_500_model.pth'
     checkpoint = torch.load(resnet_path)
     resnet.load_state_dict(checkpoint['state_dict'])
     resnet_optimizer.load_state_dict(checkpoint['optimizer'])
@@ -240,15 +240,11 @@ if __name__ == '__main__':
     # Train loop
     for epoch in range(1, epochs + 1):
         total_epochs += 1
-        run(model, train_loader, optimizer, mask, total_epochs, temperature, batch_size, epoch)
+        run(model, train_loader, optimizer, mask, total_epochs, temperature, batch_size, epoch, epochs)
 
     # Pruning
-    for i in range(leaves_to_delete):
+    for i in range(leaves_to_delete - 1):
         print(f"Iteration {i}")
-        for epoch in range(1, pruning_epochs + 1):
-            total_epochs += 1
-            print(total_epochs)
-            run(model, train_loader, optimizer, mask, total_epochs, temperature, batch_size, epoch)
 
         leaf = get_leaf_to_delete(model, memory_loader, 'cuda', mask)
         print(f"Leaf to delete: {leaf}")
@@ -262,9 +258,27 @@ if __name__ == '__main__':
                  'mask': mask}
         torch.save(state, f'{path}/{model_name}_model.pth')
 
+        for epoch in range(1, pruning_epochs + 1):
+            total_epochs += 1
+            print(total_epochs)
+            run(model, train_loader, optimizer, mask, total_epochs, temperature, batch_size, epoch, pruning_epochs)
+
+    print(f"Iteration {leaves_to_delete - 1}")
+    leaf = get_leaf_to_delete(model, memory_loader, 'cuda', mask)
+    print(f"Leaf to delete: {leaf}")
+
+    mask = update_mask(mask, leaf)
+    print(f"Mask:\n {mask}")
+
+    model_name = f'{feature_dim}_{temperature}_{k}_{batch_size}_{epochs}_{i}'
+    state = {'state_dict': model.state_dict(),
+             'optimizer': optimizer.state_dict(),
+             'mask': mask}
+    torch.save(state, f'{path}/{model_name}_model.pth')
+
     for epoch in range(1, epochs + 1):
         total_epochs += 1
-        run(model, train_loader, optimizer, mask, total_epochs, temperature, batch_size, epoch)
+        run(model, train_loader, optimizer, mask, total_epochs, temperature, batch_size, epoch, epochs)
 
     model_name = f'{feature_dim}_{temperature}_{k}_{batch_size}_{epochs}_total'
     state = {'state_dict': model.state_dict(),
