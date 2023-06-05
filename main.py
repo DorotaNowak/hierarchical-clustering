@@ -162,6 +162,8 @@ if __name__ == '__main__':
     parser.add_argument('--path', default=None, type=str, help='Path to save the model')
     parser.add_argument('--model', default='base', type=str, help='Model to use')
     parser.add_argument('--tree_height', default=None, type=int, help='The height of a tree to train')
+    parser.add_argument('--resnet', default=None, type=str, help='Trained resnet model')
+    parser.add_argument('--run_name', default=None, type=str, help='Name of the run')
 
     # Arg parse
     args = parser.parse_args()
@@ -197,7 +199,7 @@ if __name__ == '__main__':
     # Backbone model
     resnet = ResNet50(dataset_name, feature_dim).cuda()
     resnet_optimizer = optim.Adam(resnet.parameters(), lr=5e-4, weight_decay=1e-6)
-    resnet_path = f'results/{dataset_name}/resnet/128_0.5_200_128_500_500_model.pth'
+    resnet_path = f'results/{dataset_name}/resnet/{args.resnet}'
     checkpoint = torch.load(resnet_path)
     resnet.load_state_dict(checkpoint['state_dict'])
     resnet_optimizer.load_state_dict(checkpoint['optimizer'])
@@ -230,7 +232,7 @@ if __name__ == '__main__':
 
     # Path to save the results
     if path is None:
-        path = f'results/{dataset_name}/{model_type}'
+        path = f'results/{dataset_name}/{model_type}/{args.run_name}'
 
     if not os.path.exists(path):
         os.makedirs(path)

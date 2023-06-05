@@ -14,7 +14,7 @@ class ResNet50(nn.Module):
             if name == 'conv1':
                 if dataset_name == "cifar10":
                     module = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-                elif dataset_name == "mnist":
+                elif dataset_name == "mnist" or dataset_name == "fashion-mnist":
                     module = nn.Conv2d(1, 64, kernel_size=3, stride=1, padding=1, bias=False)
             if not isinstance(module, nn.Linear) and not isinstance(module, nn.MaxPool2d):
                 self.f.append(module)

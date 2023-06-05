@@ -4,6 +4,7 @@ __pycache__/
 results
 data
 runs
+/wandb/
 
 slurm-train.sh
 slurm-cluster.sh

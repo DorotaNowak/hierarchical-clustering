@@ -16,7 +16,7 @@ class SimCLRDataset:
 
     Args:
         train (bool): If True, creates dataset from ``training.pt``, otherwise from ``test.pt``.
-        dataset_name (str): The name of the dataset. Valid values: 'cifar10', 'mnist', 'imagenet10'.
+        dataset_name (str): The name of the dataset. Valid values: 'cifar10', 'mnist', 'fashion-mnist', 'imagenet10'.
         transform_name (str): The name of the transform to apply. Valid values: 'train', 'test'.
     """
 
@@ -31,6 +31,9 @@ class SimCLRDataset:
         elif dataset_name == "mnist":
             self.mean = [0.1307]
             self.std = [0.3081]
+        elif dataset_name == "fashion-mnist":
+            self.mean = 0.2859
+            self.std = 0.3530
         elif dataset_name == "imagenet10":
             self.mean = [0.485, 0.456, 0.406]
             self.std = [0.229, 0.224, 0.225]
@@ -67,6 +70,9 @@ class SimCLRDataset:
         elif self.dataset_name == "mnist":
             dataset = datasets.MNIST(root='./data/mnist', train=self.train, download=True,
                                      transform=SimCLRView(self.get_transformations(28, self.mean, self.std)))
+        elif self.dataset_name == "fashion-mnist":
+            dataset = datasets.FashionMNIST(root='./data/fashion-mnist', train=self.train, download=True,
+                                            transform=SimCLRView(self.get_transformations(28, self.mean, self.std)))
         elif self.dataset_name == "imagenet10":
             dataset = datasets.ImageNet(root='/shared/sets/datasets/vision/ImageNet', split='train',
                                         transform=SimCLRView(self.get_transformations(224, self.mean, self.std)))
