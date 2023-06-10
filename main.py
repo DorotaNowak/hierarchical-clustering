@@ -1,6 +1,7 @@
 import argparse
 import os
 import utils
+import wandb
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -12,6 +13,13 @@ from torch.utils.tensorboard import SummaryWriter
 from cluster import inference, evaluate
 from model import ResNet50, BaseModel, Model2, Model3, Model4, Model6, Model7
 from loss import binary_loss, base_binary_loss, instance_loss
+
+run = wandb.init(
+    # Set the wandb project where this run will be logged
+    project="hierarchical-clustering",
+    entity="dorota-iza-nowak",
+)
+config = run.config
 
 
 def get_leaf_to_delete(model, loader, device, mask):
@@ -78,6 +86,8 @@ def train(net, data_loader, train_optimizer, mask, temperature, batch_size, epoc
 def run(model, train_loader, optimizer, mask, total_epoch, temperature, batch_size, epoch, epochs):
     train_loss, feature_loss, cluster_loss = train(model, train_loader, optimizer, mask, temperature, batch_size, epoch, epochs)
     results['train_loss'].append(train_loss)
+    results['cluster_loss'].append(cluster_loss)
+    results['instance_loss'].append(feature_loss)
     writer.add_scalar("Loss/train", train_loss, total_epoch)
     writer.add_scalar("Loss/instance_loss", feature_loss, total_epoch)
     writer.add_scalar("Loss/cluster_loss", cluster_loss, total_epoch)
@@ -98,6 +108,10 @@ def run(model, train_loader, optimizer, mask, total_epoch, temperature, batch_si
     results['test_acc@5'].append(test_acc_5)
     writer.add_scalar("Accuracy/@5", test_acc_5, total_epoch)
     # Save statistics
+    wandb.log({"Loss/train": train_loss, "Loss/instance_loss": feature_loss, "Loss/cluster_loss": cluster_loss,
+               "Metrics/nmi": nmi, "Metrics/ari": ari, "Metrics/f": f, "Accuracy/@1": test_acc_1,
+               "Accuracy/@5": test_acc_5})
+
     data_frame = pd.DataFrame(data=results, index=range(1, total_epoch+1))
     data_frame.to_csv(f'{path}/{save_name_pre}_statistics.csv', index_label='total_epoch')
 
@@ -175,6 +189,7 @@ if __name__ == '__main__':
 
     # Initialize summary writer
     writer = SummaryWriter(log_dir=f"runs/{dataset_name}/{model_type}")
+    wandb.config.update(args)
 
     # Prepare the data
     train_data = utils.SimCLRDataset(dataset_name, 'train', True).get_dataset()
@@ -221,7 +236,7 @@ if __name__ == '__main__':
     optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-6)
 
     # Training loop
-    results = {'train_loss': [], 'test_acc@1': [], 'test_acc@5': [], 'nmi': [], 'ari': [], 'f': []}
+    results = {'train_loss': [], 'cluster_loss': [], 'instance_loss': [], 'test_acc@1': [], 'test_acc@5': [], 'nmi': [], 'ari': [], 'f': []}
     save_name_pre = f'{feature_dim}_{temperature}_{k}_{batch_size}_{epochs}'
 
     # Find the first leaf index, from root = 0
@@ -272,7 +287,7 @@ if __name__ == '__main__':
     mask = update_mask(mask, leaf)
     print(f"Mask:\n {mask}")
 
-    model_name = f'{feature_dim}_{temperature}_{k}_{batch_size}_{epochs}_{i}'
+    model_name = f'{feature_dim}_{temperature}_{k}_{batch_size}_{epochs}_{leaves_to_delete-1}'
     state = {'state_dict': model.state_dict(),
              'optimizer': optimizer.state_dict(),
              'mask': mask}
