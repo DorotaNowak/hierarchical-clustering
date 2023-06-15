@@ -8,10 +8,11 @@ from sklearn.metrics import confusion_matrix
 
 
 def imshow(img, mean, std):
-    for channel in range(3):
-        img[channel] = (img[channel] * std[channel]) + mean[channel]
-    print(img.max())
-    print(img.min())
+    if isinstance(mean, float):
+        img = (img * std) + mean
+    else:
+        for channel in range(3):
+            img[channel] = (img[channel] * std[channel]) + mean[channel]
     npimg = img.numpy()
     plt.imshow(np.transpose(npimg, (1, 2, 0)))
 

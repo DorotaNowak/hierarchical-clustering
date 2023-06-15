@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 def calculate_probability_level(feature, level):
     leaves = 2 ** (level - 1)
     probability_vector = torch.ones((feature.shape[0], leaves)).to("cuda")
@@ -35,19 +36,19 @@ def mask_correlated_samples(leaves):
 
 
 def base_binary_loss(c_i, c_j, node_mask, levels=5):
-    features = torch.cat((c_i, c_j), dim=0) #256x15
-    batch_size = c_i.shape[0] #128
+    features = torch.cat((c_i, c_j), dim=0)  # 256x15
+    batch_size = c_i.shape[0]  # 128
 
     loss_value = torch.tensor([0], device="cuda", dtype=torch.float32)
-    labels = torch.cat([torch.arange(batch_size) for i in range(2)], dim=0) #256
+    labels = torch.cat([torch.arange(batch_size) for i in range(2)], dim=0)  # 256
     labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
     labels = labels.to("cuda")
 
     mask = torch.eye(labels.shape[0], dtype=torch.bool).to("cuda")
-    labels = labels * ~mask #256x256
+    labels = labels * ~mask  # 256x256
 
     for level in range(2, levels + 1):
-        prob_features = calculate_probability_level(features, level) #256x2, 256x4, 256x8,...
+        prob_features = calculate_probability_level(features, level)  # 256x2, 256x4, 256x8,...
         prob_features = prob_features * torch.abs(
             node_mask[2 ** (level - 1) - 1: 2 ** level - 1])  #
         # Calculate loss on positive classes
@@ -56,12 +57,13 @@ def base_binary_loss(c_i, c_j, node_mask, levels=5):
             torch.sqrt(prob_features[torch.where(labels > 0)[0]].unsqueeze(1) + 1e-8),
             torch.sqrt(prob_features[torch.where(labels > 0)[1]].unsqueeze(2) + 1e-8))))
         # Calculate loss on negative classes
+        labels[:batch_size, :batch_size] = 1
+        labels[batch_size:2 * batch_size, batch_size:2 * batch_size] = 1
         loss_value += torch.mean((torch.bmm(
             torch.sqrt(prob_features[torch.where(labels == 0)[0]].unsqueeze(1) + 1e-8),
             torch.sqrt(prob_features[torch.where(labels == 0)[1]].unsqueeze(2) + 1e-8))))
 
     return loss_value
-
 
 
 def binary_loss(c_i, c_j, node_mask, levels=5, temperature=1.0):
@@ -96,7 +98,7 @@ def binary_loss(c_i, c_j, node_mask, levels=5, temperature=1.0):
         h_i = F.normalize(h_i.T, dim=1)
         h_j = F.normalize(h_j.T, dim=1)
 
-        loss = instance_loss(h_i, h_j, 1, 2 ** (level-1))
+        loss = instance_loss(h_i, h_j, 1, 2 ** (level - 1))
 
         total_loss += loss
 
