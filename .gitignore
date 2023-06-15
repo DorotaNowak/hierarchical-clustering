@@ -6,5 +6,7 @@ data
 runs
 /wandb/
 
+plots_training.py
+
 slurm-train.sh
 slurm-cluster.sh

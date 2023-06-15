@@ -68,7 +68,10 @@ def train(net, data_loader, train_optimizer, mask, temperature, batch_size, epoc
         feature_1, out_1, c_1 = net(pos_1)
         feature_2, out_2, c_2 = net(pos_2)
         feature_loss = instance_loss(out_1, out_2, temperature, batch_size)
-        cluster_loss = binary_loss(c_1, c_2, mask)
+        if args.loss_type == "contrastive":
+            cluster_loss = binary_loss(c_1, c_2, mask, levels)
+        else:
+            cluster_loss = base_binary_loss(c_1, c_2, mask, levels)
         loss = feature_loss + cluster_loss
         train_optimizer.zero_grad()
         loss.backward()
@@ -178,6 +181,7 @@ if __name__ == '__main__':
     parser.add_argument('--tree_height', default=None, type=int, help='The height of a tree to train')
     parser.add_argument('--resnet', default=None, type=str, help='Trained resnet model')
     parser.add_argument('--run_name', default=None, type=str, help='Name of the run')
+    parser.add_argument('--loss_type', default="contrastive", type=str, help='Name of the loss')
 
     # Arg parse
     args = parser.parse_args()
@@ -186,6 +190,7 @@ if __name__ == '__main__':
     batch_size, epochs, pruning_epochs = args.batch_size, args.epochs, args.pruning_epochs
     path = args.path
     model_type = args.model
+    loss_type = args.loss_type
 
     # Initialize summary writer
     writer = SummaryWriter(log_dir=f"runs/{dataset_name}/{model_type}")
