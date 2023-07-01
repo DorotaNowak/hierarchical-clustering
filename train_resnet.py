@@ -10,6 +10,9 @@ from torch.utils.tensorboard import SummaryWriter
 
 from model import ResNet50
 from loss import instance_loss
+from utils import get_imagenet10, IMAGENET_REASSIGNED_CLASSES
+
+torch.cuda.empty_cache()
 
 
 # Train for one epoch to learn unique features
@@ -44,11 +47,17 @@ def test(net, memory_data_loader, test_data_loader):
         # [D, N]
         feature_bank = torch.cat(feature_bank, dim=0).t().contiguous()
         # [N]
-        feature_labels = torch.tensor(memory_data_loader.dataset.targets, device=feature_bank.device)
+        if dataset_name == "imagenet10":
+            feature_labels = torch.tensor(memory_labels, device=feature_bank.device)
+        else:
+            feature_labels = torch.tensor(memory_data_loader.dataset.targets, device=feature_bank.device)
         # Loop test data to predict the label by weighted knn search
         test_bar = tqdm(test_data_loader)
         for (data, _), target in test_bar:
             data, target = data.cuda(non_blocking=True), target.cuda(non_blocking=True)
+            numpy_target = target.cpu().numpy()
+            mapped_target = [IMAGENET_REASSIGNED_CLASSES[data] for data in numpy_target]
+            target = torch.tensor(mapped_target, device='cuda:0')
             feature, out = net(data)
 
             total_num += data.size(0)
@@ -104,11 +113,17 @@ if __name__ == '__main__':
 
     # Prepare the data
     train_data = utils.SimCLRDataset(dataset_name, 'train', True).get_dataset()
+    if dataset_name == "imagenet10":
+        train_data, train_labels = get_imagenet10(train_data)
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True,
                               drop_last=True)
     memory_data = utils.SimCLRDataset(dataset_name, 'test', True).get_dataset()
+    if dataset_name == "imagenet10":
+        memory_data, memory_labels = get_imagenet10(memory_data)
     memory_loader = DataLoader(memory_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
     test_data = utils.SimCLRDataset(dataset_name, 'test', False).get_dataset()
+    if dataset_name == "imagenet10":
+        test_data, test_labels = get_imagenet10(test_data)
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
 
     # Model setup
@@ -123,7 +138,10 @@ if __name__ == '__main__':
         optimizer.load_state_dict(checkpoint['optimizer'])
         start_epoch = checkpoint['epoch'] + 1
 
-    c = len(memory_data.classes)
+    if dataset_name == "imagenet10":
+        c = 10
+    else:
+        c = len(memory_data.classes)
 
     # Initialize summary writer
     writer = SummaryWriter(log_dir=f"runs/{dataset_name}/resnet")

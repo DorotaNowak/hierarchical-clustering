@@ -2,6 +2,7 @@ import numpy as np
 import utils
 import argparse
 import os
+import csv
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader, ConcatDataset
@@ -85,8 +86,7 @@ if __name__ == "__main__":
     train_data = utils.SimCLRDataset(dataset_name, 'test', True).get_dataset()
     test_data = utils.SimCLRDataset(dataset_name, 'test', False).get_dataset()
     dataset = ConcatDataset([train_data, test_data])
-    print(len(dataset))
-    print(type(dataset[0]))
+    print("Data size: ", len(dataset))
     test_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
 
     c = len(test_data.classes)
@@ -128,14 +128,17 @@ if __name__ == "__main__":
     data = utils.SimCLRDataset(dataset_name, 'train', True)
     mean = data.mean
     std = data.std
-    classes = ['plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
+    classes = data.get_dataset().classes
 
     pred, true = inference(test_loader, model, device, mask)
+    with open(f'{results_path}/predicted.csv', 'w') as f:
+        writer = csv.writer(f)
+        writer.writerows(zip(pred, true))
 
     nmi, ari, f = evaluate(true, pred)
     print('NMI = {:.4f} ARI = {:.4f} F = {:.4f}'.format(nmi, ari, f))
 
-    plot_confusion_matrix(pred, true, results_path)
+    plot_confusion_matrix(pred, true, classes, results_path)
 
     for i in range(16):
         plot_cluster(dataset, pred, i, results_path, mean, std)
