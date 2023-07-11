@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader, ConcatDataset
 from plots import plot_hist, plot_cluster, plot_confusion_matrix
 from model import ResNet50, BaseModel, Model2, Model3, Model4, Model6, Model7
 from evaluation import evaluate
+from utils import get_imagenet10, reassign_image_net_class
 
 
 def make_histogram(pred, true, classes, bins=16):
@@ -84,12 +85,20 @@ if __name__ == "__main__":
 
     # Prepare the data
     train_data = utils.SimCLRDataset(dataset_name, 'test', True).get_dataset()
+    if dataset_name == "imagenet10":
+        train_data, train_labels = get_imagenet10(train_data)
     test_data = utils.SimCLRDataset(dataset_name, 'test', False).get_dataset()
+    if dataset_name == "imagenet10":
+        test_data, test_labels = get_imagenet10(test_data)
     dataset = ConcatDataset([train_data, test_data])
+
     print("Data size: ", len(dataset))
     test_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
 
-    c = len(test_data.classes)
+    if dataset_name == "imagenet10":
+        c = 10
+    else:
+        c = len(test_data.classes)
     if args.tree_height is not None:
         height = args.tree_height
     else:
@@ -128,9 +137,18 @@ if __name__ == "__main__":
     data = utils.SimCLRDataset(dataset_name, 'train', True)
     mean = data.mean
     std = data.std
+
     classes = data.get_dataset().classes
 
+    if dataset_name == "imagenet10":
+        classes = [classes[i][0] for i in [145, 153, 289, 404, 405, 510, 805, 817, 867, 950]]
+        print(classes)
+
     pred, true = inference(test_loader, model, device, mask)
+
+    if dataset_name == "imagenet10":
+        true = [reassign_image_net_class(label) for label in true]
+
     with open(f'{results_path}/predicted.csv', 'w') as f:
         writer = csv.writer(f)
         writer.writerows(zip(pred, true))

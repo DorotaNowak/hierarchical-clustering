@@ -1,9 +1,11 @@
 import torchvision
+import random
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from sklearn.metrics import confusion_matrix
 
+random.seed(42)
 
 def imshow(img, mean, std):
     if isinstance(mean, float):
@@ -20,6 +22,7 @@ def imshow(img, mean, std):
 def plot_cluster(dataset, classes, idx, path, mean, std):
     plt.clf()
     idxs = [i for i, j in enumerate(classes) if j == idx]
+    random.shuffle(idxs)
     idxs = idxs[:12]
     images = [dataset[i][0][0] for i in idxs]
     if len(images) > 0:
